@@ -1,2 +1,33 @@
 ---
-# Default vars for the caddy role (to be filled).
+# Caddy installed NATIVELY on the host (official APT repo) and managed by systemd. It is
+# the ONLY service publishing ports on the host (80/443) and reverse-proxies straight to
+# the app backends — no Nginx, no extra internal proxy.
+
+# Caddy from its official APT repo. Pin caddy_version (e.g. "2.8.4") for reproducible
+# installs; leave empty to track the repo's latest stable.
+caddy_version: ""
+caddy_keyring_path: /etc/apt/keyrings/caddy-stable.asc
+caddy_gpg_url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+caddy_repo_uri: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+
+# APT prerequisites to fetch the key/repo over HTTPS.
+caddy_apt_prereqs:
+  - ca-certificates
+
+# Public domain served by Caddy. Env-specific → overridden per env in
+# inventories/<env>/group_vars/all/vars.yml (see production).
+caddy_domain: "lucasboillot.fr"
+
+# Let's Encrypt STAGING by default: the prod ACME endpoint has strict rate limits, so we
+# only flip this to false once the setup is proven. Staging certs are browser-untrusted
+# (expected) but let us validate the full ACME flow safely.
+caddy_acme_staging: true
+
+# Internal upstream. Caddy runs on the host, so it reaches an app container via a PUBLISHED
+# port (e.g. 127.0.0.1:8000) — a bare container name is not resolvable from the host.
+# The backend may not exist yet; the Caddyfile has a 200 fallback so ACME still succeeds.
+caddy_backend_upstream: "127.0.0.1:8000"
+
+# On-host config layout (the caddy package owns /etc/caddy and this Caddyfile).
+caddy_config_dir: "/etc/caddy"
+caddy_caddyfile_path: "/etc/caddy/Caddyfile"

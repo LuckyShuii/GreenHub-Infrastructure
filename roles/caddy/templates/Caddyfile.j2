@@ -1,0 +1,37 @@
+# Managed by Ansible (caddy role) — do not edit by hand.
+{
+	# ACME CA. Staging by default (generous rate limits, browser-untrusted certs);
+	# prod issues real, trusted certs. Toggled via caddy_acme_staging.
+{% if caddy_acme_staging %}
+	acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+{% else %}
+	acme_ca https://acme-v02.api.letsencrypt.org/directory
+{% endif %}
+}
+
+# Reusable security headers: HSTS + clickjacking / MIME-sniffing hardening.
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		# Don't advertise the server software.
+		-Server
+	}
+}
+
+greenhub.{{ caddy_domain }}, api.{{ caddy_domain }} {
+	# HTTP→HTTPS redirect is automatic in Caddy; TLS is provisioned via ACME above.
+	import security_headers
+
+	# Reverse-proxy to the app container over the internal network. Upstreams are resolved
+	# lazily (per request), so a missing/absent backend does NOT stop Caddy from starting
+	# or from completing its ACME challenge.
+	reverse_proxy {{ caddy_backend_upstream }}
+
+	# Fallback: if the backend is down or not deployed yet, return a plain 200 instead of a
+	# raw 502 — the site (and its ACME-provisioned cert) still work end-to-end.
+	handle_errors {
+		respond "GREENER OK" 200
+	}
+}

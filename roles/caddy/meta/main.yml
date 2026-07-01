@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: caddy
   author: GREENER infra
-  description: "Caddy reverse proxy (automatic TLS) (stub)."
+  description: "Caddy reverse proxy (native/systemd): automatic TLS (ACME), security headers."
   license: MIT
   min_ansible_version: "2.15"
   platforms:

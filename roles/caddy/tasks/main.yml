@@ -1,6 +1,79 @@
 ---
-# caddy role — valid stub. Real logic lands in a dedicated ticket.
-# The debug task is a no-op: stays "ok", never "changed" (idempotent).
-- name: Placeholder (no action)
-  ansible.builtin.debug:
-    msg: "Role {{ ansible_role_name }}: stub — nothing to do yet."
+# Caddy installed NATIVELY from its official APT repo and run under systemd — the only
+# host-facing service (publishes 80/443), TLS via ACME. Everything declarative and
+# idempotent: no curl|sh, no install outside APT, no non-idempotent shell.
+
+- name: Install APT prerequisites
+  ansible.builtin.apt:
+    name: "{{ caddy_apt_prereqs }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure APT keyrings directory exists
+  ansible.builtin.file:
+    path: "{{ caddy_keyring_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# force: false → fetched only if absent, so no re-download on later runs.
+- name: Fetch Caddy official GPG key (armored)
+  ansible.builtin.get_url:
+    url: "{{ caddy_gpg_url }}"
+    dest: "{{ caddy_keyring_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+
+- name: Configure Caddy APT repository
+  ansible.builtin.deb822_repository:
+    name: caddy-stable
+    types: [deb]
+    uris: "{{ caddy_repo_uri }}"
+    suites: ["any-version"]
+    components: [main]
+    signed_by: "{{ caddy_keyring_path }}"
+    enabled: true
+    state: present
+  register: caddy_repo
+
+- name: Refresh APT cache after repository change
+  ansible.builtin.apt:
+    update_cache: true
+  when: caddy_repo.changed
+
+# Pin via caddy_version for reproducibility; empty installs the repo's latest stable.
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: "caddy{{ ('=' + caddy_version) if caddy_version else '' }}"
+    state: present
+    cache_valid_time: 3600
+
+- name: Ensure Caddy config directory exists
+  ansible.builtin.file:
+    path: "{{ caddy_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Validate before writing so a broken template never lands; reload fires only on a real
+# content change, keeping the second run at changed=0.
+- name: Deploy the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_caddyfile_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "caddy validate --adapter caddyfile --config %s"
+  notify: reload caddy
+
+- name: Ensure Caddy service is enabled and started
+  ansible.builtin.service:
+    name: caddy
+    enabled: true
+    state: started
