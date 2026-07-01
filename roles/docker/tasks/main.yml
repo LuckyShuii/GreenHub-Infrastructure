@@ -1,6 +1,77 @@
 ---
-# docker role — valid stub. Real logic lands in a dedicated ticket.
-# The debug task is a no-op: stays "ok", never "changed" (idempotent).
-- name: Placeholder (no action)
-  ansible.builtin.debug:
-    msg: "Role {{ ansible_role_name }}: stub — nothing to do yet."
+# Docker Engine from Docker's OFFICIAL APT repo (distro/arch auto-detected via facts).
+# No curl|sh, no get.docker.com — everything declarative and idempotent.
+
+- name: Install APT prerequisites
+  ansible.builtin.apt:
+    name: "{{ docker_apt_prereqs }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure APT keyrings directory exists
+  ansible.builtin.file:
+    path: "{{ docker_keyring_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# force: false → only fetched if absent, so no re-download on later runs.
+- name: Fetch Docker official GPG key
+  ansible.builtin.get_url:
+    url: "{{ docker_gpg_url }}"
+    dest: "{{ docker_keyring_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+
+# dpkg arch (amd64/arm64), not ansible_architecture (x86_64). Read-only → never "changed",
+# and must run under --check too since the repo task depends on its output.
+- name: Detect dpkg architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: docker_dpkg_arch
+  changed_when: false
+  check_mode: false
+
+- name: Configure Docker APT repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}"
+    suites: ["{{ ansible_facts['distribution_release'] }}"]
+    components: [stable]
+    architectures: ["{{ docker_dpkg_arch.stdout }}"]
+    signed_by: "{{ docker_keyring_path }}"
+    enabled: true
+    state: present
+  register: docker_repo
+
+- name: Refresh APT cache after repository change
+  ansible.builtin.apt:
+    update_cache: true
+  when: docker_repo.changed
+
+- name: Install Docker Engine, CLI, containerd and plugins
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+    cache_valid_time: 3600
+
+- name: Ensure docker service is enabled and started
+  ansible.builtin.service:
+    name: docker
+    enabled: true
+    state: started
+
+# Reserved for a future NON-HUMAN service account. Empty by default → no-op.
+# Humans get privileges via sudo, never via the docker group.
+- name: Add managed service accounts to the docker group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_managed_users }}"
+  loop_control:
+    label: "{{ item }}"
