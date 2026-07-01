@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: ssh
   author: GREENER infra
-  description: "SSH service hardening (reachable via VPN only) (stub)."
+  description: "SSH service hardening (intended to be reachable via VPN only, once OpenVPN is deployed) (stub)."
   license: MIT
   min_ansible_version: "2.15"
   platforms:

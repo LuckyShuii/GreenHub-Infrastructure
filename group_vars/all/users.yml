@@ -56,11 +56,12 @@ system_users:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGHULR/lweERjJEkojYNHOneS6YYLuKxYj8SkC01zW9T ton@email.comarchegroscon"
 
   # --- Non-human CD account: nologin, scoped key (forced command set by the CD role) ---
-  - name: deploy
-    state: present
-    groups: [greener]
-    sudo: false
-    shell: /usr/sbin/nologin
-    create_home: true
-    authorized_keys:
-      - "ssh-ed25519 REPLACE_ME deploy@ci"
+  # TODO SCRUM-53 : réactiver le compte deploy avec la vraie clé publique du runner CI
+  # - name: deploy
+  #   state: present
+  #   groups: [greener]
+  #   sudo: false
+  #   shell: /usr/sbin/nologin
+  #   create_home: true
+  #   authorized_keys:
+  #     - "ssh-ed25519 REPLACE_ME deploy@ci"

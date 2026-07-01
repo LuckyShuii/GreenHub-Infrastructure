@@ -16,6 +16,8 @@
     groups: "{{ item.groups | default([]) }}"
     append: false
     create_home: "{{ item.create_home | default(true) }}"
+    # Wipe home + mail spool only when offboarding (state: absent); no-op otherwise.
+    remove: "{{ (item.state | default('present')) == 'absent' }}"
   loop: "{{ system_users }}"
   loop_control:
     label: "{{ item.name }}"
