@@ -1,2 +1,24 @@
 ---
-# Default vars for the docker role (to be filled).
+# Docker Engine from Docker's official APT repo (never the distro's docker.io).
+
+# APT prerequisites for fetching the key and the repo over HTTPS.
+docker_apt_prereqs:
+  - ca-certificates
+  - curl
+  - gnupg
+
+# Docker Engine, CLI, containerd, buildx and compose plugin — all from Docker's repo.
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# Official Docker GPG key (armored) and its keyring location.
+docker_keyring_path: /etc/apt/keyrings/docker.asc
+docker_gpg_url: https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}/gpg
+
+# Users to add to the `docker` group. Reserved for a future NON-HUMAN service account
+# only — humans must use sudo, never the docker group. Keep empty by default.
+docker_managed_users: []

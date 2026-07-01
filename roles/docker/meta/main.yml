@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: docker
   author: GREENER infra
-  description: "Docker Engine + Compose plugin (stub)."
+  description: "Docker Engine + CLI + containerd + Compose plugin, from Docker's official APT repo."
   license: MIT
   min_ansible_version: "2.15"
   platforms:

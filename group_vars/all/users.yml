@@ -5,51 +5,51 @@ system_users:
   # --- Infra admins: greener group + sudo (sudo granted via the `sudo:` field only) ---
   - name: lboillot
     state: present
-    groups: [greener]
+    groups: [greener, docker]
     sudo: true
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGBczyxpPoAW0qDE/SjnXOdTkLdmkUxffe/SrMQvrdH7 lucasboillot"
   - name: ocorral
     state: present
-    groups: [greener]
+    groups: [greener, docker]
     sudo: true
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJYsoPaq5EFM/VQohxg+yri4/kOA0HMZklktUQQWHCzD oriane.corral@epitech.eu"
+
+  # --- Devs: greener, no sudo (per-env docker access will be a common-role var later) ---
   - name: hjeguirim
     state: present
-    groups: [greener]
-    sudo: true
+    groups: [ greener, docker ]
+    sudo: false
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIII0UO5fE1hSLXsK4H4PrNDUQZispAEw3bpjihvokwRN jegui@PCgaymer"
-
-  # --- Devs: greener, no sudo (per-env docker access will be a common-role var later) ---
   - name: jguillard
     state: present
-    groups: [greener]
+    groups: [greener, docker]
     sudo: false
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMkh9RWR7SwLLLlCE9ahGF6F9O/FGDKZOeeuZ8S6jHRY joan guillard"
   - name: egoudot
     state: present
-    groups: [greener]
+    groups: [greener, docker]
     sudo: false
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMQc+oR7Xdi8ulEQ0oGW5WdSXlWY2g1XCtbm+GG+W7uv user@-PC"
   - name: ecouy
     state: present
-    groups: [greener]
+    groups: [greener, docker]
     sudo: false
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDYva16npI7RupuNf4Bj3P8QNU+lgg2o7gkUCab2V5Iw emi@emi-laptop"
   - name: mloris
     state: present
-    groups: [greener]
+    groups: [greener, docker]
     sudo: false
     shell: /bin/bash
     authorized_keys:
