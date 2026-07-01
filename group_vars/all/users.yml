@@ -2,23 +2,21 @@
 # System accounts — declarative source of truth, shared across ALL environments.
 # authorized_keys = PUBLIC keys in clear (not secrets). Offboard = state: absent + PR + replay.
 system_users:
-  # --- Infra admins: greener + sudo ---
+  # --- Infra admins: greener group + sudo (sudo granted via the `sudo:` field only) ---
   - name: lboillot
     state: present
-    groups: [greener, sudo]
+    groups: [greener]
     sudo: true
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGBczyxpPoAW0qDE/SjnXOdTkLdmkUxffe/SrMQvrdH7 lucasboillot"
   - name: ocorral
     state: present
-    groups: [greener, sudo]
+    groups: [greener]
     sudo: true
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJYsoPaq5EFM/VQohxg+yri4/kOA0HMZklktUQQWHCzD oriane.corral@epitech.eu"
-
-  # --- Devs: greener, no sudo (per-env docker access will be a common-role var later) ---
   - name: hjeguirim
     state: present
     groups: [greener]
@@ -26,6 +24,8 @@ system_users:
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIII0UO5fE1hSLXsK4H4PrNDUQZispAEw3bpjihvokwRN jegui@PCgaymer"
+
+  # --- Devs: greener, no sudo (per-env docker access will be a common-role var later) ---
   - name: jguillard
     state: present
     groups: [greener]

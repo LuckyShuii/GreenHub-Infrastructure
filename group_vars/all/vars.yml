@@ -5,7 +5,8 @@
 
 common_timezone: "Europe/Paris"
 
-# Ansible connection user: an infra admin with sudo (see users.yml).
+# Image bootstrap account, not a users.yml account (exists before Ansible, unmanaged).
+# To migrate to a nominative admin account later.
 ansible_user: ubuntu
 
 # Vault indirection: real values live per-env in inventories/<env>/.../vault.yml as vault_*.

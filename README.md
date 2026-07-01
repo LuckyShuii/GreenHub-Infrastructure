@@ -10,12 +10,14 @@ ansible.cfg            # no default inventory, become on, pipelining, vault_pass
 requirements.yml       # pinned collections: community.general, ansible.posix, community.docker
 site.yml               # pure orchestrator: groups -> roles, in order (no inline tasks)
 Makefile               # deps, lint, check, deploy, ping, vault-edit, vault-rekey
+group_vars/all/
+  vars.yml               # shared non-secret vars (all envs)
+  users.yml              # declarative system accounts, shared across envs (PUBLIC keys in clear)
 inventories/
   production/  staging/
     hosts.yml                    # group greener_vps (the all-in-one VPS)
-    group_vars/all/vars.yml      # non-secret vars; re-expose vault_*
+    group_vars/all/vars.yml      # env-specific vars (e.g. env_name); re-expose vault_*
     group_vars/all/vault.yml     # ENCRYPTED (ansible-vault): the env secrets
-    group_vars/all/users.yml     # declarative system accounts (PUBLIC keys in clear)
     host_vars/
 roles/
   common/                        # REAL role: users, groups, sudoers, packages, timezone

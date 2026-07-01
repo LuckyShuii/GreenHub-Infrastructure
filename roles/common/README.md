@@ -5,7 +5,7 @@ Baseline applied first on every host: base packages, timezone, the shared
 
 ## Users pattern (declarative)
 
-Accounts are the single source of truth in `inventories/<env>/group_vars/all/users.yml`
+Accounts are the single source of truth in `group_vars/all/users.yml`
 as a `system_users` list. Each entry:
 
 | key             | meaning                                              |

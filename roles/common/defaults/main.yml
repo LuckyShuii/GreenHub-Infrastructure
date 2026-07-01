@@ -14,6 +14,6 @@ common_base_packages:
   - htop
   - vim
 
-# Declarative account list comes from inventories/*/group_vars/all/users.yml.
+# Declarative account list comes from group_vars/all/users.yml (overridable per env if needed).
 # Fallback keeps the loops safe if an inventory omits it.
 system_users: []

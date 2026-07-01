@@ -21,13 +21,15 @@
     label: "{{ item.name }}"
 
 # Public keys only (never secrets). Skipped for accounts being offboarded.
+# One task per user with the full key set + exclusive: true, so users.yml is the
+# absolute truth: any key removed from the list is revoked on the server.
 - name: Deploy authorized keys
   ansible.posix.authorized_key:
-    user: "{{ item.0.name }}"
-    key: "{{ item.1 }}"
+    user: "{{ item.name }}"
+    key: "{{ item.authorized_keys | join('\n') }}"
     state: present
-    exclusive: false
-  loop: "{{ system_users | subelements('authorized_keys', skip_missing=true) }}"
+    exclusive: true
+  loop: "{{ system_users | selectattr('authorized_keys', 'defined') | list }}"
   loop_control:
-    label: "{{ item.0.name }}"
-  when: (item.0.state | default('present')) == 'present'
+    label: "{{ item.name }}"
+  when: (item.state | default('present')) == 'present'
