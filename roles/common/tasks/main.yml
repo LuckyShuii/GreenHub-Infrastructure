@@ -1,0 +1,12 @@
+---
+- name: Base packages and timezone
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Shared group and directory
+  ansible.builtin.import_tasks: groups.yml
+
+- name: System accounts (declarative)
+  ansible.builtin.import_tasks: users.yml
+
+- name: Sudo rights
+  ansible.builtin.import_tasks: sudoers.yml

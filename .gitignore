@@ -1,0 +1,17 @@
+# Vault passphrase — never in the repo
+vault_pass
+*.vault_pass
+.vault_pass*
+
+# Decrypted secrets / rendered artifacts
+*.env
+.env
+*.decrypted
+!.env.example        # keep the versioned template (used from SCRUM-64 on)
+
+# Ansible runtime
+*.retry
+.ansible/
+collections/
+
+.claude

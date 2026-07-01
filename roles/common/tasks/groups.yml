@@ -1,0 +1,14 @@
+---
+- name: Ensure project group
+  ansible.builtin.group:
+    name: "{{ greener_group }}"
+    state: present
+
+# 2775 = setgid, so files created here inherit the greener group (shared workspace).
+- name: Ensure shared directory (setgid 2775)
+  ansible.builtin.file:
+    path: "{{ greener_shared_dir }}"
+    state: directory
+    owner: root
+    group: "{{ greener_group }}"
+    mode: "2775"

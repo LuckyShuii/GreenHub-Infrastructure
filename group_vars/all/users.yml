@@ -1,0 +1,67 @@
+---
+# System accounts — declarative source of truth, shared across ALL environments.
+# authorized_keys = PUBLIC keys in clear (not secrets). Offboard = state: absent + PR + replay.
+system_users:
+  # --- Infra admins: greener group + sudo (sudo granted via the `sudo:` field only) ---
+  - name: lboillot
+    state: present
+    groups: [greener]
+    sudo: true
+    shell: /bin/bash
+    authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGBczyxpPoAW0qDE/SjnXOdTkLdmkUxffe/SrMQvrdH7 lucasboillot"
+  - name: ocorral
+    state: present
+    groups: [greener]
+    sudo: true
+    shell: /bin/bash
+    authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJYsoPaq5EFM/VQohxg+yri4/kOA0HMZklktUQQWHCzD oriane.corral@epitech.eu"
+  - name: hjeguirim
+    state: present
+    groups: [greener]
+    sudo: true
+    shell: /bin/bash
+    authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIII0UO5fE1hSLXsK4H4PrNDUQZispAEw3bpjihvokwRN jegui@PCgaymer"
+
+  # --- Devs: greener, no sudo (per-env docker access will be a common-role var later) ---
+  - name: jguillard
+    state: present
+    groups: [greener]
+    sudo: false
+    shell: /bin/bash
+    authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMkh9RWR7SwLLLlCE9ahGF6F9O/FGDKZOeeuZ8S6jHRY joan guillard"
+  - name: egoudot
+    state: present
+    groups: [greener]
+    sudo: false
+    shell: /bin/bash
+    authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMQc+oR7Xdi8ulEQ0oGW5WdSXlWY2g1XCtbm+GG+W7uv user@-PC"
+  - name: ecouy
+    state: present
+    groups: [greener]
+    sudo: false
+    shell: /bin/bash
+    authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDYva16npI7RupuNf4Bj3P8QNU+lgg2o7gkUCab2V5Iw emi@emi-laptop"
+  - name: mloris
+    state: present
+    groups: [greener]
+    sudo: false
+    shell: /bin/bash
+    authorized_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGHULR/lweERjJEkojYNHOneS6YYLuKxYj8SkC01zW9T ton@email.comarchegroscon"
+
+  # --- Non-human CD account: nologin, scoped key (forced command set by the CD role) ---
+  # TODO SCRUM-53 : réactiver le compte deploy avec la vraie clé publique du runner CI
+  # - name: deploy
+  #   state: present
+  #   groups: [greener]
+  #   sudo: false
+  #   shell: /usr/sbin/nologin
+  #   create_home: true
+  #   authorized_keys:
+  #     - "ssh-ed25519 REPLACE_ME deploy@ci"

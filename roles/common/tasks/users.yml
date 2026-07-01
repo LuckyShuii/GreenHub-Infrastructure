@@ -1,0 +1,37 @@
+---
+# Create any secondary groups referenced by users before assigning them.
+- name: Ensure secondary groups exist
+  ansible.builtin.group:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ system_users | selectattr('groups', 'defined') | map(attribute='groups') | flatten | unique | reject('equalto', 'sudo') | list }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Manage accounts
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    groups: "{{ item.groups | default([]) }}"
+    append: false
+    create_home: "{{ item.create_home | default(true) }}"
+    # Wipe home + mail spool only when offboarding (state: absent); no-op otherwise.
+    remove: "{{ (item.state | default('present')) == 'absent' }}"
+  loop: "{{ system_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Public keys only (never secrets). Skipped for accounts being offboarded.
+# One task per user with the full key set + exclusive: true, so users.yml is the
+# absolute truth: any key removed from the list is revoked on the server.
+- name: Deploy authorized keys
+  ansible.posix.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ item.authorized_keys | join('\n') }}"
+    state: present
+    exclusive: true
+  loop: "{{ system_users | selectattr('authorized_keys', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: (item.state | default('present')) == 'present'

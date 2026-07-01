@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  role_name: openvpn
+  author: GREENER infra
+  description: "OpenVPN server (least-privilege access to the VPS) (stub)."
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions: [bookworm]
+    - name: Ubuntu
+      versions: [jammy, noble]
+dependencies: []

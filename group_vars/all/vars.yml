@@ -1,0 +1,15 @@
+---
+# Non-secret vars shared by ALL environments.
+# This layer (playbook-level group_vars/all) OUTRANKS inventory group_vars/all, so keep
+# ONLY shared keys here — anything an env must override belongs in inventories/<env>/.
+
+common_timezone: "Europe/Paris"
+
+# Image bootstrap account, not a users.yml account (exists before Ansible, unmanaged).
+# To migrate to a nominative admin account later.
+ansible_user: ubuntu
+
+# Vault indirection: real values live per-env in inventories/<env>/.../vault.yml as vault_*.
+db_password: "{{ vault_db_password }}"
+grafana_admin_password: "{{ vault_grafana_admin_password }}"
+backup_restic_password: "{{ vault_backup_restic_password }}"
