@@ -1,3 +1,10 @@
 ---
 # Env-specific vars ONLY — shared vars live in the root group_vars/all/vars.yml.
 env_name: production
+
+# Production public domain served by Caddy (the role default is only a placeholder).
+caddy_domain: "lucasboillot.fr"
+
+# V1 single-VPS: this env is the real prod, so use Let's Encrypt PROD ACME for
+# browser-trusted certs. The role default stays staging (rate-limit safety net).
+caddy_acme_staging: false
