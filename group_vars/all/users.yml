@@ -5,14 +5,14 @@ system_users:
   # --- Infra admins: greener group + sudo (sudo granted via the `sudo:` field only) ---
   - name: lboillot
     state: present
-    groups: [greener]
+    groups: [greener, docker]
     sudo: true
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGBczyxpPoAW0qDE/SjnXOdTkLdmkUxffe/SrMQvrdH7 lucasboillot"
   - name: ocorral
     state: present
-    groups: [greener]
+    groups: [greener, docker]
     sudo: true
     shell: /bin/bash
     authorized_keys:
