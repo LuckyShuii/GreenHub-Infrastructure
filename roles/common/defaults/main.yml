@@ -1,0 +1,19 @@
+---
+# Shared project group and its collaborative directory.
+greener_group: greener
+greener_shared_dir: /srv/greener
+
+# Host timezone (override per env in group_vars).
+common_timezone: "Etc/UTC"
+
+# Base packages present on every GREENER host.
+common_base_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - htop
+  - vim
+
+# Declarative account list comes from inventories/*/group_vars/all/users.yml.
+# Fallback keeps the loops safe if an inventory omits it.
+system_users: []

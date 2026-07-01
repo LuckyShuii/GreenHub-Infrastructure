@@ -1,0 +1,33 @@
+---
+# Create any secondary groups referenced by users before assigning them.
+- name: Ensure secondary groups exist
+  ansible.builtin.group:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ system_users | selectattr('groups', 'defined') | map(attribute='groups') | flatten | unique | reject('equalto', 'sudo') | list }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Manage accounts
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    groups: "{{ item.groups | default([]) }}"
+    append: false
+    create_home: "{{ item.create_home | default(true) }}"
+  loop: "{{ system_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Public keys only (never secrets). Skipped for accounts being offboarded.
+- name: Deploy authorized keys
+  ansible.posix.authorized_key:
+    user: "{{ item.0.name }}"
+    key: "{{ item.1 }}"
+    state: present
+    exclusive: false
+  loop: "{{ system_users | subelements('authorized_keys', skip_missing=true) }}"
+  loop_control:
+    label: "{{ item.0.name }}"
+  when: (item.0.state | default('present')) == 'present'

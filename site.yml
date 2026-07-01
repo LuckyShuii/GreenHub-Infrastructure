@@ -1,0 +1,22 @@
+---
+# Pure orchestrator: maps host groups to roles, in order. No inline tasks, no logic.
+
+# common runs FIRST on every host. It creates the named accounts and deploys their
+# public keys — MUST happen before the ssh role hardens sshd, otherwise a fresh VPS
+# with PasswordAuthentication/PermitRootLogin disabled would lock everyone out.
+- name: Common baseline
+  hosts: all
+  roles:
+    - common
+
+# Application/service roles (alphabetical: no deploy-order intent encoded here yet).
+- name: GREENER VPS services
+  hosts: greener_vps
+  roles:
+    - backups
+    - caddy
+    - docker
+    - firewall
+    - monitoring
+    - openvpn
+    - ssh

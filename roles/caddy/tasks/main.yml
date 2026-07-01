@@ -1,0 +1,6 @@
+---
+# caddy role — valid stub. Real logic lands in a dedicated ticket.
+# The debug task is a no-op: stays "ok", never "changed" (idempotent).
+- name: Placeholder (no action)
+  ansible.builtin.debug:
+    msg: "Role {{ ansible_role_name }}: stub — nothing to do yet."
