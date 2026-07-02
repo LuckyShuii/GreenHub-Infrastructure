@@ -1,0 +1,18 @@
+---
+# Backend (FastAPI) deployment config. V1 scope: only materializes the .env consumed
+# by the app (docker compose env_file) — the compose deployment itself comes later.
+
+# On-host layout.
+backend_app_dir: /opt/greener
+backend_env_path: "{{ backend_app_dir }}/.env"
+
+# .env ownership: root-only until the non-human deploy account lands (SCRUM-53).
+backend_env_owner: root
+backend_env_group: root
+
+# Non-secret DB connection params. "postgres" = compose service name (resolvable by the
+# app container on the compose network). Override per env in inventories/<env>/ if needed.
+backend_db_host: postgres
+backend_db_port: 5432
+backend_db_name: greener
+backend_db_user: greener
