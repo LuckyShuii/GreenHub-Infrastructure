@@ -1,0 +1,22 @@
+---
+# Materializes vault secrets into an on-host .env for the FastAPI backend. The app only
+# ever sees plain env var names (contract = .env.example in the backend repo).
+
+- name: Ensure backend app directory exists
+  ansible.builtin.file:
+    path: "{{ backend_app_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# diff: false → the Makefile runs --check --diff; without it the rendered secrets
+# would land in stdout / CI logs on every change.
+- name: Deploy backend .env
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ backend_env_path }}"
+    owner: "{{ backend_env_owner }}"
+    group: "{{ backend_env_group }}"
+    mode: "0600"
+  diff: false
