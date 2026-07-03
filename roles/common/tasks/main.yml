@@ -1,12 +1,17 @@
 ---
+# Static imports: tags propagate to every imported task.
 - name: Base packages and timezone
   ansible.builtin.import_tasks: packages.yml
+  tags: [common, packages]
 
 - name: Shared group and directory
   ansible.builtin.import_tasks: groups.yml
+  tags: [common, groups]
 
 - name: System accounts (declarative)
   ansible.builtin.import_tasks: users.yml
+  tags: [common, users]
 
 - name: Sudo rights
   ansible.builtin.import_tasks: sudoers.yml
+  tags: [common, sudoers]

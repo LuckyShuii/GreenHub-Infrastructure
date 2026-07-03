@@ -75,3 +75,19 @@
   loop: "{{ docker_managed_users }}"
   loop_control:
     label: "{{ item }}"
+
+- name: Install Docker SDK for Python
+  ansible.builtin.apt:
+    name: "{{ docker_sdk_packages }}"
+    state: present
+    cache_valid_time: 3600
+
+# Credential lands in ~deploy/.docker/config.json; no_log → token never in output.
+- name: Log the deploy service account into Docker Hub
+  community.docker.docker_login:
+    username: "{{ dockerhub_pull_user }}"
+    password: "{{ dockerhub_pull_token }}"
+  become: true
+  become_user: deploy
+  no_log: "{{ hide_secrets | default(true) }}"
+  tags: [docker, dockerhub-login]
