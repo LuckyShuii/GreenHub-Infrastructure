@@ -22,3 +22,7 @@ docker_gpg_url: https://download.docker.com/linux/{{ ansible_facts['distribution
 # Users to add to the `docker` group. Reserved for a future NON-HUMAN service account
 # only — humans must use sudo, never the docker group. Keep empty by default.
 docker_managed_users: []
+
+# Needed on the target by community.docker modules.
+docker_sdk_packages:
+  - python3-docker

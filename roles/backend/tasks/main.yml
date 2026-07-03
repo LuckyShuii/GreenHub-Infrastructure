@@ -10,12 +10,7 @@
     group: root
     mode: "0755"
 
-# diff: false → the Makefile runs --check --diff; without it the rendered secrets
-# would land in stdout / CI logs on every change.
-# no_log → covers what diff: false doesn't: verbose runs (-v/-vvv) and failure output
-# serialize the full task result, secrets included. Trade-off: it also censors error
-# messages, so it can be disabled for local debugging with -e hide_secrets=false
-# (never in CI).
+# diff: false + no_log → secrets never in output; debug with -e hide_secrets=false.
 - name: Deploy backend .env
   ansible.builtin.template:
     src: env.j2
@@ -25,3 +20,4 @@
     mode: "0600"
   diff: false
   no_log: "{{ hide_secrets | default(true) }}"
+  tags: [backend, backend-env]

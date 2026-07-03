@@ -14,6 +14,9 @@ db_password: "{{ vault_db_password }}"
 grafana_admin_password: "{{ vault_grafana_admin_password }}"
 backup_restic_password: "{{ vault_backup_restic_password }}"
 
+dockerhub_pull_user: "{{ vault_dockerhub_pull_user }}"
+dockerhub_pull_token: "{{ vault_dockerhub_pull_token }}"
+
 ai_pipeline: "yangy50/garbage-classification"
 ai_host: "0.0.0.0"
 ai_port: 8443
