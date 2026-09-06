@@ -1,0 +1,83 @@
+# {{ ansible_managed }} — rendered by the app_stack role, do not edit on the host.
+# ${DB_*} is interpolated by compose from {{ app_stack_env_file }} (0600), so no secret lands here.
+services:
+  gateway:
+    image: {{ app_stack_gateway_image }}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_UPSTREAM: {{ app_stack_backend_upstream }}
+      AI_UPSTREAM: {{ app_stack_ai_upstream }}
+    volumes:
+      - {{ app_stack_gateway_dir }}:/etc/nginx/templates:ro
+    ports:
+      - "{{ app_stack_gateway_publish }}:80"
+    networks:
+      - greener_internal
+
+  postgres:
+    image: {{ app_stack_postgres_image }}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - {{ app_stack_pg_data_volume }}:/var/lib/postgresql/data
+      - {{ app_stack_postgres_init_dir }}:/docker-entrypoint-initdb.d:ro
+    networks:
+      - greener_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    image: {{ app_stack_backend_image }}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - {{ app_stack_env_file }}
+    expose:
+      - "8000"
+    networks:
+      - greener_internal
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  ai:
+    image: {{ app_stack_ai_image }}
+    restart: unless-stopped
+    env_file:
+      - {{ app_stack_env_file }}
+    expose:
+      - "{{ ai_port }}"
+    volumes:
+      - {{ app_stack_ai_models_volume }}:/root/.cache/huggingface
+    networks:
+      - greener_internal
+    # stopgap TCP check until the AI service exposes /health
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(s.connect_ex(('127.0.0.1', {{ ai_port }})))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  {{ app_stack_pg_data_volume }}:
+  {{ app_stack_ai_models_volume }}:
+
+networks:
+  greener_internal:
+    driver: bridge

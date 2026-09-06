@@ -10,7 +10,7 @@
     - role: common
       tags: [common]
 
-# Application/service roles (alphabetical: no deploy-order intent encoded here yet).
+# app_stack runs after docker (engine) and backend (.env) — both must precede it.
 - name: GREENER VPS services
   hosts: greener_vps
   roles:
@@ -22,6 +22,8 @@
       tags: [caddy]
     - role: docker
       tags: [docker]
+    - role: app_stack
+      tags: [app_stack]
     - role: firewall
       tags: [firewall]
     - role: monitoring

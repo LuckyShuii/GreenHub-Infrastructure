@@ -1,0 +1,11 @@
+---
+# Gateway config is bind-mounted, so a change needs an explicit restart to reload nginx.
+- name: restart gateway
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_stack_dir }}"
+    files:
+      - docker-compose.yml
+    services:
+      - gateway
+    state: restarted
+  when: app_stack_enabled | bool
