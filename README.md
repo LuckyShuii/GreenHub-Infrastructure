@@ -20,8 +20,12 @@ inventories/
     group_vars/all/vault.yml     # ENCRYPTED (ansible-vault): the env secrets
     host_vars/
 roles/
-  common/                        # REAL role: users, groups, sudoers, packages, timezone
-  firewall/ ssh/ openvpn/ caddy/ docker/ monitoring/ backups/   # valid stubs
+  common/                        # REAL: users, groups, sudoers, packages, timezone
+  backend/                       # REAL: renders /opt/greener/.env from vault secrets
+  docker/                        # REAL: Docker Engine + compose plugin (official APT repo)
+  app_stack/                     # REAL: renders + runs the app docker compose stack
+  caddy/                         # REAL: host-facing reverse proxy (TLS), proxies to the gateway
+  firewall/ ssh/ openvpn/ monitoring/ backups/   # valid stubs
 ```
 
 ## Prerequisites
@@ -41,6 +45,40 @@ make check                    # dry-run against staging
 make deploy                   # apply to staging
 make deploy ENV=production    # apply to production
 make ping ENV=production      # connectivity check
+```
+
+## Application stack (Docker Compose)
+
+The `app_stack` role renders the compose file, the nginx gateway config and the postgres
+init scripts onto the VPS, then pulls the images and brings the stack up: postgres + backend
++ ai behind an internal gateway, only the gateway published (Caddy proxies to it).
+
+It is gated by `app_stack_enabled` (default **false**), so a plain `make deploy` renders the
+files without pulling images that may not exist yet. To actually start the stack:
+
+```bash
+# whole play, stack enabled (staging)
+ansible-playbook -i inventories/staging/hosts.yml site.yml -e app_stack_enabled=true
+
+# only the app_stack role (every role is tagged)
+ansible-playbook -i inventories/staging/hosts.yml site.yml --tags app_stack -e app_stack_enabled=true
+
+# production
+ansible-playbook -i inventories/production/hosts.yml site.yml --tags app_stack -e app_stack_enabled=true
+```
+
+Or set `app_stack_enabled: true` in `inventories/<env>/group_vars/all/vars.yml` and just run
+`make deploy`.
+
+Images live in the private repo `lucasboillot/greenhub` (tags `backend-<sha>` / `ai-<sha>`);
+pin a build per service with `-e app_stack_backend_version=<sha>` / `-e app_stack_ai_version=<sha>`.
+Prereq: the images must already be published (by CI, or a manual `docker push`).
+
+### Local dev stack (no Ansible)
+
+```bash
+docker compose -f docker-compose.dev.yml up -d                            # full: postgres + backend + ai + gateway (build from sibling repos, hot reload)
+docker compose -f docker-compose.dev.yml up -d postgres backend gateway   # skip the heavy AI build
 ```
 
 ## Secrets (ansible-vault)
