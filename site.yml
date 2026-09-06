@@ -9,14 +9,15 @@
   roles:
     - common
 
-# Application/service roles (alphabetical: no deploy-order intent encoded here yet).
+# Order matters: docker (engine) → backend (.env) → app_stack (compose) → caddy (proxy).
 - name: GREENER VPS services
   hosts: greener_vps
   roles:
-    - backend
-    - backups
-    - caddy
     - docker
+    - backend
+    - app_stack
+    - caddy
+    - backups
     - firewall
     - monitoring
     - openvpn

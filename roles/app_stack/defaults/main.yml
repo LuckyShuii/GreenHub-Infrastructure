@@ -1,0 +1,29 @@
+---
+# Off by default so a deploy never pulls images CI has not published yet.
+app_stack_enabled: false
+
+app_stack_dir: /opt/greener
+app_stack_env_file: "{{ app_stack_dir }}/.env"
+app_stack_gateway_dir: "{{ app_stack_dir }}/gateway"
+app_stack_postgres_init_dir: "{{ app_stack_dir }}/postgres-init"
+app_stack_compose_file: "{{ app_stack_dir }}/docker-compose.yml"
+
+# Private repo; backend/ai differ by tag prefix, versioned independently by commit SHA
+# (the deploy webhook overrides *_version; "latest" is a bootstrap default only).
+app_stack_repo: "docker.io/lucasboillot/greenhub"
+app_stack_backend_version: "latest"
+app_stack_ai_version: "latest"
+app_stack_backend_image: "{{ app_stack_repo }}:backend-{{ app_stack_backend_version }}"
+app_stack_ai_image: "{{ app_stack_repo }}:ai-{{ app_stack_ai_version }}"
+
+app_stack_gateway_image: "nginx:1.27-alpine"
+app_stack_postgres_image: "postgis/postgis:16-3.4-alpine"
+
+app_stack_backend_upstream: "backend:8000"
+app_stack_ai_upstream: "ai:{{ ai_port }}"
+
+# Only the gateway is published, on loopback — Caddy reverse-proxies to it.
+app_stack_gateway_publish: "127.0.0.1:8080"
+
+app_stack_pg_data_volume: pg_data
+app_stack_ai_models_volume: ai_models

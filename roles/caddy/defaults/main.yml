@@ -1,7 +1,7 @@
 ---
 # Caddy installed NATIVELY on the host (official APT repo) and managed by systemd. It is
-# the ONLY service publishing ports on the host (80/443) and reverse-proxies straight to
-# the app backends — no Nginx, no extra internal proxy.
+# the ONLY service publishing ports on the host (80/443) and reverse-proxies to the
+# app_stack internal gateway (nginx), which fans out to the backend / ai services.
 
 # Caddy from its official APT repo. Pin caddy_version (e.g. "2.8.4") for reproducible
 # installs; leave empty to track the repo's latest stable.
@@ -23,10 +23,8 @@ caddy_domain: "lucasboillot.fr"
 # (expected) but let us validate the full ACME flow safely.
 caddy_acme_staging: true
 
-# Internal upstream. Caddy runs on the host, so it reaches an app container via a PUBLISHED
-# port (e.g. 127.0.0.1:8000) — a bare container name is not resolvable from the host.
-# The backend may not exist yet; the Caddyfile has a 200 fallback so ACME still succeeds.
-caddy_backend_upstream: "127.0.0.1:8000"
+# The app_stack gateway's published loopback port (see app_stack_gateway_publish).
+caddy_backend_upstream: "127.0.0.1:8080"
 
 # On-host config layout (the caddy package owns /etc/caddy and this Caddyfile).
 caddy_config_dir: "/etc/caddy"

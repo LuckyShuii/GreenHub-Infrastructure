@@ -1,0 +1,48 @@
+---
+# Requires the docker role (engine + compose) and backend role (.env) to run first.
+
+- name: Ensure stack directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ app_stack_dir }}"
+    - "{{ app_stack_gateway_dir }}"
+    - "{{ app_stack_postgres_init_dir }}"
+
+- name: Deploy the internal gateway config template
+  ansible.builtin.copy:
+    src: gateway/default.conf.template
+    dest: "{{ app_stack_gateway_dir }}/default.conf.template"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart gateway
+
+- name: Deploy the postgres init scripts
+  ansible.builtin.copy:
+    src: postgres-init/
+    dest: "{{ app_stack_postgres_init_dir }}/"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render the compose file
+  ansible.builtin.template:
+    src: docker-compose.prod.yml.j2
+    dest: "{{ app_stack_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Pull images and (re)start the stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_stack_dir }}"
+    files:
+      - docker-compose.yml
+    pull: always
+    state: present
+  when: app_stack_enabled | bool

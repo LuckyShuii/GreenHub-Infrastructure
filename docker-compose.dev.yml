@@ -1,0 +1,92 @@
+# Dev stack: builds backend + ai from the sibling repos with hot reload; only the gateway is published.
+services:
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: greener-gateway-dev
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_UPSTREAM: backend:8000
+      AI_UPSTREAM: ai:8000
+    volumes:
+      - ./roles/app_stack/files/gateway:/etc/nginx/templates:ro
+    ports:
+      - "127.0.0.1:8080:80"
+    networks:
+      - greener_internal
+    restart: unless-stopped
+
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: greener-postgres-dev
+    environment:
+      POSTGRES_USER: ${DB_USER:-greener}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword}
+      POSTGRES_DB: ${DB_NAME:-greener}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./roles/app_stack/files/postgres-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - greener_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build:
+      context: ../backend/backend
+      dockerfile: Dockerfile.dev
+    container_name: greener-backend-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: local
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-greener}
+      DB_USER: ${DB_USER:-greener}
+      DB_PASSWORD: ${DB_PASSWORD:-devpassword}
+    volumes:
+      - ../backend/backend:/greener
+    expose:
+      - "8000"
+    networks:
+      - greener_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ai owned by Houssem; build is heavy and it has no /health yet
+  ai:
+    build:
+      context: ../ai-service
+      dockerfile: dockerfile
+    container_name: greener-ai-dev
+    env_file:
+      - path: ../ai-service/.env
+        required: false
+    environment:
+      AI_HOST: 0.0.0.0
+      AI_PORT: 8000
+    expose:
+      - "8000"
+    networks:
+      - greener_internal
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+
+networks:
+  greener_internal:
+    driver: bridge
