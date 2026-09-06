@@ -7,18 +7,28 @@
 - name: Common baseline
   hosts: all
   roles:
-    - common
+    - role: common
+      tags: [common]
 
-# Order matters: docker (engine) → backend (.env) → app_stack (compose) → caddy (proxy).
+# app_stack runs after docker (engine) and backend (.env) — both must precede it.
 - name: GREENER VPS services
   hosts: greener_vps
   roles:
-    - docker
-    - backend
-    - app_stack
-    - caddy
-    - backups
-    - firewall
-    - monitoring
-    - openvpn
-    - ssh
+    - role: backend
+      tags: [backend]
+    - role: backups
+      tags: [backups]
+    - role: caddy
+      tags: [caddy]
+    - role: docker
+      tags: [docker]
+    - role: app_stack
+      tags: [app_stack]
+    - role: firewall
+      tags: [firewall]
+    - role: monitoring
+      tags: [monitoring]
+    - role: openvpn
+      tags: [openvpn]
+    - role: ssh
+      tags: [ssh]
