@@ -47,9 +47,15 @@ SHA. The compose here is written to support that targeted, per-service redeploy.
 
 ## Routing
 
-- `/api/*` → `backend:8000`
-- `/ai/*`  → `ai:{{ ai_port }}`
+- `/api/*` → `backend:8000/api/*` — **URI forwarded untouched**: the FastAPI app owns the
+  `/api` prefix, the gateway only routes. A dev running the backend repo's compose alone
+  (no gateway) therefore calls the exact same paths on `localhost:8000`.
+- `/ai/*`  → `ai:{{ ai_port }}/*` — prefix **stripped**, because the AI service (owned by
+  Houssem) carries no prefix of its own and serves `/greener/...`.
 - `/health` → backend `/health` (stack liveness through the gateway)
+
+Anything outside those three prefixes is not routed, so the backend must keep every route
+under `/api` (Swagger included) or `/health`.
 
 Upstreams resolve per-request via the Docker DNS resolver, so a service that is down does
 not stop the gateway from booting (same resilience as the Caddyfile fallback).

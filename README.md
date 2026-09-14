@@ -81,6 +81,12 @@ docker compose -f docker-compose.dev.yml up -d                            # full
 docker compose -f docker-compose.dev.yml up -d postgres backend gateway   # skip the heavy AI build
 ```
 
+The gateway is published on `127.0.0.1:8080`, so the API answers on
+`http://localhost:8080/api/...` — the **same paths** as production and as the backend repo's
+own compose (`http://localhost:8000/api/...`), because the FastAPI app owns the `/api`
+prefix and the gateway forwards the URI untouched. Backend devs who only need db + API can
+stay in the backend repo; use this stack to exercise the gateway and the AI service.
+
 ## Secrets (ansible-vault)
 
 The only "vault" here is **ansible-vault** (file encryption in git). No HashiCorp Vault,
