@@ -9,6 +9,7 @@
 webhook_packages:
   - webhook
 webhook_packaged_service: webhook
+webhook_packaged_unit_path: /usr/lib/systemd/system/webhook.service
 
 # The deploy playbook runs on the VPS itself, so Ansible has to be installed there too.
 webhook_ansible_packages:

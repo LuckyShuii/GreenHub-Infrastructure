@@ -20,6 +20,13 @@
     update_cache: true
     cache_valid_time: 3600
 
+# Keyed on the unit file rather than on the install task: under --check the package is not
+# actually installed, and systemd fails on a unit it cannot find.
+- name: Look for the packaged webhook unit
+  ansible.builtin.stat:
+    path: "{{ webhook_packaged_unit_path }}"
+  register: webhook_packaged_unit
+
 # The packaged unit listens on every interface with its own /etc/webhook.conf. Ours is the
 # only one that must run.
 - name: Disable the packaged webhook service
@@ -28,6 +35,7 @@
     enabled: false
     state: stopped
     masked: true
+  when: webhook_packaged_unit.stat.exists
 
 - name: Ensure the config directory exists
   ansible.builtin.file:
