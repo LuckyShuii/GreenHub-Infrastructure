@@ -32,3 +32,5 @@
       tags: [openvpn]
     - role: ssh
       tags: [ssh]
+    - role: webhook
+      tags: [webhook]

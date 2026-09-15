@@ -21,6 +21,10 @@ WAN → Caddy (host, 80/443, TLS) → gateway (nginx, 127.0.0.1:8080) → backen
    scripts to `/opt/greener/postgres-init/`.
 3. Pulls images and brings the stack up (`community.docker.docker_compose_v2`).
 
+Everything under `/opt/greener` is owned by `deploy`, the non-human CD account: that is what
+lets the recurring deploy re-render these files locally without root. The modes stay
+world-readable because the bind mounts are read by container uids, not by `deploy`.
+
 DB credentials are never written into the compose file: `${DB_USER/DB_PASSWORD/DB_NAME}` are
 interpolated by docker compose from `/opt/greener/.env` (0600, rendered by the backend role),
 so the compose stays secret-free.
@@ -37,7 +41,7 @@ Three things must hold before the pull can succeed, and each fails with its own 
 
 | symptom | cause |
 |---|---|
-| `repository does not exist or may require 'docker login'` on `…:backend-<empty>` | the version var was overridden with an empty string — the assert at the top of this role now catches it first |
+| `repository does not exist or may require 'docker login'` on `…:backend-<empty>` | no tag could be resolved at all — the assert at the top of this role now catches it first |
 | `pull access denied … may require 'docker login'` | root has no registry credentials; the login task below fixes it, but it needs `python3-docker`, so the **docker role must have run at least once on the host** |
 | `manifest unknown` | the tag is well-formed and you are authenticated, but CI has never published that image |
 
@@ -59,14 +63,35 @@ provisioned, but on a fresh VPS run the whole play first — this role assumes t
 
 Registry images live in the private repo `lucasboillot/greenhub`; backend and ai share it and
 differ by a tag prefix (`backend-*` / `ai-*`). Tags are keyed by **commit SHA** (not `:latest`)
-so a build can be pinned and rolled back, and the two services are versioned **independently**
-via `app_stack_backend_version` / `app_stack_ai_version` (`latest` is only a bootstrap default).
+so a build can be pinned and rolled back, and the two services are versioned **independently**.
 
-This role performs the **initial bring-up** (push run from the control host). The **recurring**
-deploy is a separate concern (webhook + `deploy.yml` running locally on the VPS): the CI, after
-pushing an image, POSTs to `…/hooks/deploy-backend` | `deploy-ia`; the daemon runs
-`docker compose pull` + `docker compose up -d <service>` for the targeted service with the new
-SHA. The compose here is written to support that targeted, per-service redeploy.
+A tag is resolved per service, in this order:
+
+1. **an explicit override** — `-e app_stack_backend_version=<sha>`;
+2. **what this host is already running** — read from `app_stack_state_file`
+   (`/opt/greener/deployed-versions.yml`), which this role rewrites after every successful
+   bring-up;
+3. **`app_stack_bootstrap_version`** (`latest`) — only on a host that has never deployed.
+
+Step 2 is what makes a *targeted* redeploy safe. Rolling only the backend re-renders the whole
+compose file, so without a record the `ai` image would silently fall back to the bootstrap tag
+while the running container kept the old one — the file would stop describing the host. Reading
+the record back means the untargeted service is re-rendered with exactly the tag it is running.
+
+It also answers "what is deployed here" without inspecting digests:
+
+```bash
+cat /opt/greener/deployed-versions.yml
+```
+
+This role performs the **initial bring-up** (push run from the control host) and is also the
+engine of the **recurring** deploy: the `webhook` role installs a daemon that runs `deploy.yml`
+locally on the VPS, which calls this role back with `app_stack_services` limited to the
+targeted service and its new tag. See `roles/webhook/README.md`.
+
+`app_stack_wait` maps to `docker compose up --wait`. It is **off** for provisioning (a cold AI
+start would hold the run for the whole indexing) and **on** for the recurring deploy, so a
+broken image fails the deploy instead of returning green.
 
 ## Routing
 

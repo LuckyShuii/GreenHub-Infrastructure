@@ -6,9 +6,10 @@
 backend_app_dir: /opt/greener
 backend_env_path: "{{ backend_app_dir }}/.env"
 
-# .env ownership: root-only until the non-human deploy account lands (SCRUM-53).
-backend_env_owner: root
-backend_env_group: root
+# Owned by the non-human CD account: the recurring deploy re-renders this file locally as
+# `deploy`, without root. 0600 still keeps it to that account (and root).
+backend_env_owner: deploy
+backend_env_group: deploy
 
 # Non-secret DB connection params. "postgres" = compose service name (resolvable by the
 # app container on the compose network). Override per env in inventories/<env>/ if needed.

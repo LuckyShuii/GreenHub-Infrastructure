@@ -2,17 +2,18 @@
 # System accounts — declarative source of truth, shared across ALL environments.
 # authorized_keys = PUBLIC keys in clear (not secrets). Offboard = state: absent + PR + replay.
 system_users:
-  # --- Infra admins: greener group + sudo (sudo granted via the `sudo:` field only) ---
+  # --- Infra admins: greener group + sudo (sudo granted via the `sudo:` field only).
+  # adm is what lets them read the journal, so a deploy can be followed without root. ---
   - name: lboillot
     state: present
-    groups: [greener, docker]
+    groups: [greener, docker, adm]
     sudo: true
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGBczyxpPoAW0qDE/SjnXOdTkLdmkUxffe/SrMQvrdH7 lucasboillot"
   - name: ocorral
     state: present
-    groups: [greener, docker]
+    groups: [greener, docker, adm]
     sudo: true
     shell: /bin/bash
     authorized_keys:
@@ -21,7 +22,7 @@ system_users:
   # --- Devs: greener, no sudo (per-env docker access will be a common-role var later) ---
   - name: hjeguirim
     state: present
-    groups: [ greener, docker ]
+    groups: [greener, docker]
     sudo: false
     shell: /bin/bash
     authorized_keys:

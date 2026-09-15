@@ -9,6 +9,7 @@ Least-privilege access: OpenVPN, SSH VPN-only, ufw default-deny.
 ansible.cfg            # no default inventory, become on, pipelining, vault_password_file (out of repo)
 requirements.yml       # pinned collections: community.general, ansible.posix, community.docker
 site.yml               # pure orchestrator: groups -> roles, in order (no inline tasks)
+deploy.yml             # recurring deploy of ONE service, run locally ON THE VPS by the CD webhook
 Makefile               # deps, lint, check, deploy, ping, vault-edit, vault-rekey
 group_vars/all/
   vars.yml               # shared non-secret vars (all envs)
@@ -25,6 +26,7 @@ roles/
   docker/                        # REAL: Docker Engine + compose plugin (official APT repo)
   app_stack/                     # REAL: renders + runs the app docker compose stack
   caddy/                         # REAL: host-facing reverse proxy (TLS), proxies to the gateway
+  webhook/                       # REAL: CD receiver (adnanh/webhook) + the local deploy tooling
   firewall/ ssh/ openvpn/ monitoring/ backups/   # valid stubs
 ```
 
@@ -73,6 +75,31 @@ Or set `app_stack_enabled: true` in `inventories/<env>/group_vars/all/vars.yml` 
 Images live in the private repo `lucasboillot/greenhub` (tags `backend-<sha>` / `ai-<sha>`);
 pin a build per service with `-e app_stack_backend_version=<sha>` / `-e app_stack_ai_version=<sha>`.
 Prereq: the images must already be published (by CI, or a manual `docker push`).
+
+## Continuous deployment
+
+Provisioning is a **push** run from a workstation; the **recurring** deploy runs on the VPS
+itself. After publishing an image, the pipeline POSTs to the deploy endpoint:
+
+```
+POST https://deploy.<domain>/hooks/deploy-backend   (or /hooks/deploy-ia)
+X-Deploy-Token: <VPS_DEPLOY_KEY>
+{"version": "<commit sha>"}
+```
+
+Caddy terminates TLS and forwards to the `webhook` daemon on `127.0.0.1:9000`, which checks the
+token and the SHA — anything else is a `403` with nothing executed — then runs `deploy.yml`
+locally, as the `deploy` account, under a `flock` so two pipelines cannot deploy at once. The CI
+never opens an SSH session to the VPS: `VPS_DEPLOY_KEY` is an **HTTP token, not an SSH key**.
+
+```bash
+journalctl -u greener-webhook -f            # the deploy trail
+cat /opt/greener/deployed-versions.yml      # what is running right now
+```
+
+The token lives in the env vault as `vault_deploy_webhook_token` and must be handed to the
+backend and AI repos as the `VPS_DEPLOY_KEY` GitHub secret. See `roles/webhook/README.md` for
+the full contract, the rollback procedure and the on-host layout.
 
 ### Local dev stack (no Ansible)
 

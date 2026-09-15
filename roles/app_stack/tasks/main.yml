@@ -1,25 +1,55 @@
 ---
 # Requires the docker role (engine + compose + SDK) and backend role (.env) to run first.
 
-# An empty version renders "<repo>:backend-" and docker answers the misleading
-# "repository does not exist", so catch it here instead.
-- name: Assert the image versions are set
+- name: Check whether this host has a recorded deployment
+  ansible.builtin.stat:
+    path: "{{ app_stack_state_file }}"
+  register: app_stack_state
+
+- name: Read the image tags this host is running
+  ansible.builtin.slurp:
+    src: "{{ app_stack_state_file }}"
+  register: app_stack_state_raw
+  when: app_stack_state.stat.exists
+
+# Set only when the file is there, so the fact keeps its dict type (a folded template
+# would hand back a string).
+- name: Load the recorded image tags
+  ansible.builtin.set_fact:
+    app_stack_recorded: "{{ app_stack_state_raw.content | b64decode | from_yaml }}"
+  when: app_stack_state.stat.exists
+
+# Precedence: an explicit override, else what this host is already running, else the
+# bootstrap default. That is what lets the CD webhook roll ONE service without resetting
+# the other one's tag when the compose file is re-rendered.
+- name: Resolve the image tag of each service
+  ansible.builtin.set_fact:
+    app_stack_backend_tag: >-
+      {{ app_stack_backend_version | default('', true)
+         or (app_stack_recorded | default({})).backend | default(app_stack_bootstrap_version) }}
+    app_stack_ai_tag: >-
+      {{ app_stack_ai_version | default('', true)
+         or (app_stack_recorded | default({})).ai | default(app_stack_bootstrap_version) }}
+
+# An empty tag renders "<repo>:backend-" and docker answers the misleading "repository
+# does not exist", so catch it here instead.
+- name: Assert the image tags resolved to something
   ansible.builtin.assert:
     that:
-      - app_stack_backend_version | default('', true) | length > 0
-      - app_stack_ai_version | default('', true) | length > 0
+      - app_stack_backend_tag | length > 0
+      - app_stack_ai_tag | length > 0
     fail_msg: >-
-      app_stack_backend_version and app_stack_ai_version must be non-empty image tags,
-      got '{{ app_stack_backend_version }}' and '{{ app_stack_ai_version }}'.
-      Pass a published tag, e.g. -e app_stack_backend_version=<sha>.
+      Could not resolve an image tag for both services, got '{{ app_stack_backend_tag }}'
+      and '{{ app_stack_ai_tag }}'. Pass a published tag, e.g.
+      -e app_stack_backend_version=<sha>.
     quiet: true
 
 - name: Ensure stack directories exist
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: root
-    group: root
+    owner: "{{ app_stack_owner }}"
+    group: "{{ app_stack_group }}"
     mode: "0755"
   loop:
     - "{{ app_stack_dir }}"
@@ -30,8 +60,8 @@
   ansible.builtin.copy:
     src: gateway/default.conf.template
     dest: "{{ app_stack_gateway_dir }}/default.conf.template"
-    owner: root
-    group: root
+    owner: "{{ app_stack_owner }}"
+    group: "{{ app_stack_group }}"
     mode: "0644"
   notify: restart gateway
 
@@ -39,21 +69,21 @@
   ansible.builtin.copy:
     src: postgres-init/
     dest: "{{ app_stack_postgres_init_dir }}/"
-    owner: root
-    group: root
+    owner: "{{ app_stack_owner }}"
+    group: "{{ app_stack_group }}"
     mode: "0644"
 
 - name: Render the compose file
   ansible.builtin.template:
     src: docker-compose.prod.yml.j2
     dest: "{{ app_stack_compose_file }}"
-    owner: root
-    group: root
+    owner: "{{ app_stack_owner }}"
+    group: "{{ app_stack_group }}"
     mode: "0644"
 
-# The compose command runs as the connection user (root, via the global become), so the
-# registry credentials must be in ROOT's docker config. The docker role logs in as the
-# `deploy` account instead — that one is for the CD webhook and does not help here.
+# Compose runs as the connection user, so the credentials must sit in THAT user's docker
+# config: root on a provisioning run, `deploy` on a local deploy run. Logging in here
+# covers both — the docker role's login only ever prepares the `deploy` account.
 - name: Log in to the image registry
   community.docker.docker_login:
     username: "{{ dockerhub_pull_user }}"
@@ -69,4 +99,17 @@
     services: "{{ app_stack_services | default([], true) }}"
     pull: always
     state: present
+    wait: "{{ app_stack_wait | bool }}"
+    wait_timeout: "{{ app_stack_wait_timeout | int }}"
+  when: app_stack_enabled | bool
+
+# Only after the bring-up succeeded, so a failed deploy leaves the previous tags recorded
+# and the next run does not believe a broken image is live.
+- name: Record the image tags now deployed
+  ansible.builtin.copy:
+    content: "{{ {'backend': app_stack_backend_tag, 'ai': app_stack_ai_tag} | to_nice_yaml }}"
+    dest: "{{ app_stack_state_file }}"
+    owner: "{{ app_stack_owner }}"
+    group: "{{ app_stack_group }}"
+    mode: "0644"
   when: app_stack_enabled | bool

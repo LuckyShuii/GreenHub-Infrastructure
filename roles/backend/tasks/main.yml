@@ -2,12 +2,14 @@
 # Materializes vault secrets into an on-host .env for the FastAPI backend. The app only
 # ever sees plain env var names (contract = .env.example in the backend repo).
 
+# Same directory the app_stack role uses; both roles give it the same owner so a run does
+# not flip it back and forth.
 - name: Ensure backend app directory exists
   ansible.builtin.file:
     path: "{{ backend_app_dir }}"
     state: directory
-    owner: root
-    group: root
+    owner: "{{ backend_env_owner }}"
+    group: "{{ backend_env_group }}"
     mode: "0755"
 
 # diff: false + no_log → secrets never in output; debug with -e hide_secrets=false.
