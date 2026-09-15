@@ -1,5 +1,18 @@
 ---
-# Requires the docker role (engine + compose) and backend role (.env) to run first.
+# Requires the docker role (engine + compose + SDK) and backend role (.env) to run first.
+
+# An empty version renders "<repo>:backend-" and docker answers the misleading
+# "repository does not exist", so catch it here instead.
+- name: Assert the image versions are set
+  ansible.builtin.assert:
+    that:
+      - app_stack_backend_version | default('', true) | length > 0
+      - app_stack_ai_version | default('', true) | length > 0
+    fail_msg: >-
+      app_stack_backend_version and app_stack_ai_version must be non-empty image tags,
+      got '{{ app_stack_backend_version }}' and '{{ app_stack_ai_version }}'.
+      Pass a published tag, e.g. -e app_stack_backend_version=<sha>.
+    quiet: true
 
 - name: Ensure stack directories exist
   ansible.builtin.file:
@@ -37,6 +50,16 @@
     owner: root
     group: root
     mode: "0644"
+
+# The compose command runs as the connection user (root, via the global become), so the
+# registry credentials must be in ROOT's docker config. The docker role logs in as the
+# `deploy` account instead — that one is for the CD webhook and does not help here.
+- name: Log in to the image registry
+  community.docker.docker_login:
+    username: "{{ dockerhub_pull_user }}"
+    password: "{{ dockerhub_pull_token }}"
+  no_log: "{{ hide_secrets | default(true) }}"
+  when: app_stack_enabled | bool
 
 - name: Pull images and (re)start the stack
   community.docker.docker_compose_v2:
