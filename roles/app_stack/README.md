@@ -94,13 +94,14 @@ reload) and is a heavy build. Assumes the sibling-repo workspace layout.
 
 Blocks the first AI deploy, on the AI repo (owned by Houssem — do not change it here):
 
-- **`data/` is not in the image**: `dockerfile` copies `src/`, `main.py`, `configs.py` and
+- **`data/` must be in the image**: `dockerfile` copied `src/`, `main.py`, `configs.py` and
   `logging_config.py` but not `data/`, while `DATA_DIR=./data`. In prod the image is pulled
-  with no source checkout, so region discovery raises `FileNotFoundError`, indexing is
-  skipped and every request answers 404 "unknown region". Needs a `COPY ./data ./data`.
-  The dev compose works around it with a bind-mount, prod must not: shipping the region
-  files from here would put AI content under infra ownership and let it drift from the
-  image it is supposed to match. Keep `app_stack_enabled: false` for `ai` until it lands.
+  with no source checkout, so region discovery raised `FileNotFoundError`, indexing was
+  skipped and every request answered 404 "unknown region". Fixed by a `COPY ./data ./data`
+  on the AI repo's `fix/LBT-SCRUM-117-copy-data-image` — **do not enable `ai` in prod until
+  that branch is merged and an image built from it is published.** The region files must
+  come from the image, not from here: shipping them from infra would put AI content under
+  infra ownership and let it drift from the image it is supposed to match.
 
 Non-blocking:
 

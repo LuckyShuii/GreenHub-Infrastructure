@@ -113,7 +113,8 @@ services:
       DATA_DIR: ./data
       LOG_LEVEL: INFO
     volumes:
-      # The image does not ship data/ yet, so the region files come from the repo.
+      # The image ships data/ too; mounting the repo's copy lets a dev edit a region
+      # JSON and just restart, instead of rebuilding a 3.6 GB image.
       - ../ai-service/data:/greener/data:ro
       - ai_models:/root/.cache/huggingface
     expose:
