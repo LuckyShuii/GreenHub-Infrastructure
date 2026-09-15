@@ -1,4 +1,6 @@
-# Dev stack: builds backend + ai from the sibling repos with hot reload; only the gateway is published.
+# Dev stack: builds backend + ai from the sibling repos; only the gateway is published.
+# Mirrors roles/app_stack/templates/docker-compose.prod.yml.j2 — a change here usually
+# belongs there too (and vice versa).
 services:
   gateway:
     image: nginx:1.27-alpine
@@ -8,7 +10,7 @@ services:
         condition: service_healthy
     environment:
       BACKEND_UPSTREAM: backend:8000
-      AI_UPSTREAM: ai:8000
+      AI_UPSTREAM: ai:8443
     volumes:
       - ./roles/app_stack/files/gateway:/etc/nginx/templates:ro
     ports:
@@ -66,26 +68,65 @@ services:
       retries: 5
       start_period: 15s
 
-  # ai owned by Houssem; build is heavy and it has no /health yet
+  # Vector store backing the AI service. Version pinned to the ai-service repo's
+  # QDRANT_VERSION; the official image is used rather than its qdrant.dockerfile.
+  qdrant:
+    image: qdrant/qdrant:v1.18.2
+    container_name: greener-qdrant-dev
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+    expose:
+      - "6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - greener_internal
+    restart: unless-stopped
+    # No curl/wget in the image: speak HTTP over bash's /dev/tcp.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333; printf 'GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ai owned by Houssem; the build is heavy, there is no Dockerfile.dev (so no hot reload)
+  # and no /health yet. First boot indexes 114 items into qdrant before the port opens.
   ai:
     build:
       context: ../ai-service
       dockerfile: dockerfile
     container_name: greener-ai-dev
+    depends_on:
+      qdrant:
+        condition: service_healthy
     env_file:
       - path: ../ai-service/.env
         required: false
     environment:
       AI_HOST: 0.0.0.0
-      AI_PORT: 8000
+      AI_PORT: "8443"
+      EMBEDDING_MODEL_NAME: facebook/dinov2-small
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      DEVICE: cpu
+      DATA_DIR: ./data
+      LOG_LEVEL: INFO
+    volumes:
+      # The image ships data/ too; mounting the repo's copy lets a dev edit a region
+      # JSON and just restart, instead of rebuilding a 3.6 GB image.
+      - ../ai-service/data:/greener/data:ro
+      - ai_models:/root/.cache/huggingface
     expose:
-      - "8000"
+      - "8443"
     networks:
       - greener_internal
     restart: unless-stopped
 
 volumes:
   pg_data:
+  qdrant_storage:
+  ai_models:
 
 networks:
   greener_internal:
