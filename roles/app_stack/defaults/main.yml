@@ -2,6 +2,11 @@
 # Off by default so a deploy never pulls images CI has not published yet.
 app_stack_enabled: false
 
+# Compose services to bring up; empty = all of them. Lets a bring-up skip a service whose
+# image is not published yet, and gives the CD webhook its per-service redeploy.
+# Compose also starts the depends_on of whatever is listed.
+app_stack_services: []
+
 app_stack_dir: /opt/greener
 app_stack_env_file: "{{ app_stack_dir }}/.env"
 app_stack_gateway_dir: "{{ app_stack_dir }}/gateway"

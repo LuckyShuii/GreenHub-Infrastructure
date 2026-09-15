@@ -66,6 +66,7 @@
     project_src: "{{ app_stack_dir }}"
     files:
       - docker-compose.yml
+    services: "{{ app_stack_services | default([], true) }}"
     pull: always
     state: present
   when: app_stack_enabled | bool
