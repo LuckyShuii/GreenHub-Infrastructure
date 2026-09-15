@@ -33,6 +33,28 @@ Requires the **docker** role (engine + compose plugin) and the **backend** role
 `app_stack_enabled` is **false** by default, so a deploy never tries to pull images that CI
 has not published yet. Flip it per env once the registry images exist (published by CI).
 
+Three things must hold before the pull can succeed, and each fails with its own message:
+
+| symptom | cause |
+|---|---|
+| `repository does not exist or may require 'docker login'` on `…:backend-<empty>` | the version var was overridden with an empty string — the assert at the top of this role now catches it first |
+| `pull access denied … may require 'docker login'` | root has no registry credentials; the login task below fixes it, but it needs `python3-docker`, so the **docker role must have run at least once on the host** |
+| `manifest unknown` | the tag is well-formed and you are authenticated, but CI has never published that image |
+
+`app_stack_services` limits the bring-up to a subset (empty = all). Only **backend** and
+**ai** come from the private registry; **postgres**, **qdrant** and the **gateway** run on
+public images, so they can be deployed before anything has been published:
+
+```bash
+-e '{"app_stack_services": ["gateway", "backend", "postgres"]}'   # leave ai out
+```
+
+Compose also starts the `depends_on` of whatever is listed.
+
+Running `--tags app_stack` on its own skips every other role. That is fine on a host already
+provisioned, but on a fresh VPS run the whole play first — this role assumes the docker role
+(engine, compose plugin, SDK) and the backend role (`/opt/greener/.env`) have run.
+
 ## Image tags & deploy model
 
 Registry images live in the private repo `lucasboillot/greenhub`; backend and ai share it and
