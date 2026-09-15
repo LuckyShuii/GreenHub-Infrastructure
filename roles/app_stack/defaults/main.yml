@@ -18,6 +18,10 @@ app_stack_ai_image: "{{ app_stack_repo }}:ai-{{ app_stack_ai_version }}"
 
 app_stack_gateway_image: "nginx:1.27-alpine"
 app_stack_postgres_image: "postgis/postgis:16-3.4-alpine"
+# Official image, pinned to the QDRANT_VERSION of the ai-service repo — keep them in sync.
+# We do not build its qdrant.dockerfile (it only adds curl for a healthcheck); the probe
+# below uses bash's /dev/tcp instead, so there is no third image for CI to publish.
+app_stack_qdrant_image: "qdrant/qdrant:v1.18.2"
 
 app_stack_backend_upstream: "backend:8000"
 app_stack_ai_upstream: "ai:{{ ai_port }}"
@@ -27,3 +31,10 @@ app_stack_gateway_publish: "127.0.0.1:8080"
 
 app_stack_pg_data_volume: pg_data
 app_stack_ai_models_volume: ai_models
+# Holds the indexed vectors: without it every restart re-downloads and re-embeds the
+# reference images of all 114 items (many minutes, and the API does not answer meanwhile).
+app_stack_qdrant_storage_volume: qdrant_storage
+
+# First boot indexes every region before uvicorn accepts connections, so the AI probe
+# needs a long grace period (see roles/app_stack/README.md).
+app_stack_ai_start_period: 20m

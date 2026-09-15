@@ -55,9 +55,33 @@ services:
       retries: 5
       start_period: 15s
 
+  # Vector store backing the AI service. Internal only, like postgres.
+  qdrant:
+    image: {{ app_stack_qdrant_image }}
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: "{{ qdrant_port }}"
+      QDRANT__LOG_LEVEL: "{{ ai_log_level }}"
+    expose:
+      - "{{ qdrant_port }}"
+    volumes:
+      - {{ app_stack_qdrant_storage_volume }}:/qdrant/storage
+    networks:
+      - greener_internal
+    # The image ships neither curl nor wget, so the probe speaks HTTP over bash's /dev/tcp.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/{{ qdrant_port }}; printf 'GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   ai:
     image: {{ app_stack_ai_image }}
     restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_healthy
     env_file:
       - {{ app_stack_env_file }}
     expose:
@@ -66,17 +90,19 @@ services:
       - {{ app_stack_ai_models_volume }}:/root/.cache/huggingface
     networks:
       - greener_internal
-    # stopgap TCP check until the AI service exposes /health
+    # Stopgap TCP check until the AI service exposes /health. Its startup indexing runs
+    # inside the FastAPI lifespan, so the port stays closed until indexing is done.
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(s.connect_ex(('127.0.0.1', {{ ai_port }})))\""]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: {{ app_stack_ai_start_period }}
 
 volumes:
   {{ app_stack_pg_data_volume }}:
   {{ app_stack_ai_models_volume }}:
+  {{ app_stack_qdrant_storage_volume }}:
 
 networks:
   greener_internal:

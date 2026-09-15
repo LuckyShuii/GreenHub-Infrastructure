@@ -51,7 +51,7 @@ make ping ENV=production      # connectivity check
 
 The `app_stack` role renders the compose file, the nginx gateway config and the postgres
 init scripts onto the VPS, then pulls the images and brings the stack up: postgres + backend
-+ ai behind an internal gateway, only the gateway published (Caddy proxies to it).
++ ai + qdrant behind an internal gateway, only the gateway published (Caddy proxies to it).
 
 It is gated by `app_stack_enabled` (default **false**), so a plain `make deploy` renders the
 files without pulling images that may not exist yet. To actually start the stack:
@@ -77,7 +77,7 @@ Prereq: the images must already be published (by CI, or a manual `docker push`).
 ### Local dev stack (no Ansible)
 
 ```bash
-docker compose -f docker-compose.dev.yml up -d                            # full: postgres + backend + ai + gateway (build from sibling repos, hot reload)
+docker compose -f docker-compose.dev.yml up -d                            # full: postgres + backend + ai + qdrant + gateway (built from the sibling repos)
 docker compose -f docker-compose.dev.yml up -d postgres backend gateway   # skip the heavy AI build
 ```
 
@@ -86,6 +86,11 @@ The gateway is published on `127.0.0.1:8080`, so the API answers on
 own compose (`http://localhost:8000/api/...`), because the FastAPI app owns the `/api`
 prefix and the gateway forwards the URI untouched. Backend devs who only need db + API can
 stay in the backend repo; use this stack to exercise the gateway and the AI service.
+
+The AI service needs qdrant and indexes it at startup **before** it accepts any connection:
+the first `up` with an empty `qdrant_storage` volume takes many minutes and downloads
+reference images from the internet. Keep the volume between runs. See
+`roles/app_stack/README.md` for the details and the open points on the AI image.
 
 ## Secrets (ansible-vault)
 
