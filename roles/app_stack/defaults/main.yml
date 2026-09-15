@@ -7,19 +7,39 @@ app_stack_enabled: false
 # Compose also starts the depends_on of whatever is listed.
 app_stack_services: []
 
+# Artifacts belong to the non-human CD account so the recurring deploy (deploy.yml, run
+# locally as `deploy`) re-renders them without root. Modes stay world-readable: the bind
+# mounts are read by container uids, not by `deploy`.
+app_stack_owner: deploy
+app_stack_group: deploy
+
 app_stack_dir: /opt/greener
 app_stack_env_file: "{{ app_stack_dir }}/.env"
 app_stack_gateway_dir: "{{ app_stack_dir }}/gateway"
 app_stack_postgres_init_dir: "{{ app_stack_dir }}/postgres-init"
 app_stack_compose_file: "{{ app_stack_dir }}/docker-compose.yml"
 
-# Private repo; backend/ai differ by tag prefix, versioned independently by commit SHA
-# (the deploy webhook overrides *_version; "latest" is a bootstrap default only).
+# Private repo; backend/ai differ by tag prefix and are versioned independently by commit
+# SHA. These two are OVERRIDES: empty means "keep the tag this host is recorded as
+# running", so rolling one service never rewrites the other's pin back to a default.
 app_stack_repo: "docker.io/lucasboillot/greenhub"
-app_stack_backend_version: "latest"
-app_stack_ai_version: "latest"
-app_stack_backend_image: "{{ app_stack_repo }}:backend-{{ app_stack_backend_version }}"
-app_stack_ai_image: "{{ app_stack_repo }}:ai-{{ app_stack_ai_version }}"
+app_stack_backend_version: ""
+app_stack_ai_version: ""
+
+# Records the tag each service was last deployed with — the answer to "what is running
+# here", and what makes a targeted redeploy safe. Written after every successful bring-up.
+app_stack_state_file: "{{ app_stack_dir }}/deployed-versions.yml"
+
+# Used only when nothing is recorded yet and no override was given (fresh host).
+app_stack_bootstrap_version: "latest"
+
+# Resolved by the role (see tasks/main.yml); the images follow from them.
+app_stack_backend_image: "{{ app_stack_repo }}:backend-{{ app_stack_backend_tag }}"
+app_stack_ai_image: "{{ app_stack_repo }}:ai-{{ app_stack_ai_tag }}"
+
+# Services the CD webhook may roll; the rest run public images and come up with the
+# provisioning run.
+app_stack_deployable_services: [backend, ai]
 
 app_stack_gateway_image: "nginx:1.27-alpine"
 app_stack_postgres_image: "postgis/postgis:16-3.4-alpine"
@@ -43,3 +63,9 @@ app_stack_qdrant_storage_volume: qdrant_storage
 # First boot indexes every region before uvicorn accepts connections, so the AI probe
 # needs a long grace period (see roles/app_stack/README.md).
 app_stack_ai_start_period: 20m
+
+# `docker compose up --wait`: block until the targeted services are healthy. Off for the
+# provisioning run (a cold AI start would hold it for the whole indexing); the deploy
+# playbook turns it on, so a broken image fails the deploy instead of passing silently.
+app_stack_wait: false
+app_stack_wait_timeout: 600
