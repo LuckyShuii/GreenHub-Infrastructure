@@ -1,0 +1,171 @@
+---
+# Requires the common role (creates the deploy account) and the docker role (engine +
+# the deploy account's registry login) to have run first.
+
+- name: Assert the deploy token is available
+  ansible.builtin.assert:
+    that:
+      - deploy_webhook_token is defined
+      - deploy_webhook_token | length >= 32
+    fail_msg: >-
+      deploy_webhook_token is missing or too short for this environment. Generate one with
+      `openssl rand -hex 32`, add it to the env vault as vault_deploy_webhook_token, and
+      give the same value to the CI as the VPS_DEPLOY_KEY repo secret.
+    quiet: true
+
+- name: Install the webhook daemon and a local Ansible
+  ansible.builtin.apt:
+    name: "{{ webhook_packages + webhook_ansible_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# The packaged unit listens on every interface with its own /etc/webhook.conf. Ours is the
+# only one that must run.
+- name: Disable the packaged webhook service
+  ansible.builtin.systemd:
+    name: "{{ webhook_packaged_service }}"
+    enabled: false
+    state: stopped
+    masked: true
+
+- name: Ensure the config directory exists
+  ansible.builtin.file:
+    path: "{{ webhook_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ webhook_group }}"
+    mode: "0750"
+
+# 0400 and owned by deploy: only the account the daemon runs as can read it. This is what
+# lets the deploy run decrypt the vault locally, without a control host.
+- name: Install the vault passphrase for the local deploy runs
+  ansible.builtin.copy:
+    content: "{{ lookup('file', webhook_vault_pass_src | expanduser) }}"
+    dest: "{{ webhook_vault_pass_file }}"
+    owner: "{{ webhook_user }}"
+    group: "{{ webhook_group }}"
+    mode: "0400"
+  diff: false
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: Ensure the local Ansible tree exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ webhook_user }}"
+    group: "{{ webhook_group }}"
+    mode: "0750"
+  loop:
+    - "{{ webhook_ansible_dir }}"
+    - "{{ webhook_ansible_dir }}/roles"
+    - "{{ webhook_ansible_dir }}/inventories/local/group_vars/all"
+
+- name: Ship the deploy playbook and its collection requirements
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/{{ item }}"
+    dest: "{{ webhook_ansible_dir }}/{{ item }}"
+    owner: "{{ webhook_user }}"
+    group: "{{ webhook_group }}"
+    mode: "0640"
+  loop:
+    - deploy.yml
+    - requirements.yml
+
+- name: Ship the roles the deploy playbook uses
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/roles/{{ item }}"
+    dest: "{{ webhook_ansible_dir }}/roles/"
+    owner: "{{ webhook_user }}"
+    group: "{{ webhook_group }}"
+    mode: "0640"
+    directory_mode: "0750"
+  loop: "{{ webhook_ansible_roles }}"
+
+# decrypt: false is what keeps the vault encrypted at rest on the VPS — without it Ansible
+# helpfully decrypts vaulted sources in transit and we would write the secrets in clear.
+- name: Ship the shared vars
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/group_vars"
+    dest: "{{ webhook_ansible_dir }}/"
+    decrypt: false
+    owner: "{{ webhook_user }}"
+    group: "{{ webhook_group }}"
+    mode: "0640"
+    directory_mode: "0750"
+
+- name: Ship this environment's vars (vault stays encrypted)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/inventories/{{ env_name }}/group_vars/all/"
+    dest: "{{ webhook_ansible_dir }}/inventories/local/group_vars/all/"
+    decrypt: false
+    owner: "{{ webhook_user }}"
+    group: "{{ webhook_group }}"
+    mode: "0640"
+
+- name: Render the local Ansible configuration
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ webhook_ansible_dir }}/{{ item.dest }}"
+    owner: "{{ webhook_user }}"
+    group: "{{ webhook_group }}"
+    mode: "0640"
+  loop:
+    - src: ansible.cfg.j2
+      dest: ansible.cfg
+    - src: hosts.yml.j2
+      dest: inventories/local/hosts.yml
+  loop_control:
+    label: "{{ item.dest }}"
+
+# Pinned to the same requirements.yml as the control host, so a local run behaves like a
+# push run. Re-run on every provisioning so a version bump propagates.
+- name: Install the pinned collections for the local deploy runs
+  ansible.builtin.command:
+    cmd: >-
+      ansible-galaxy collection install
+      -r {{ webhook_ansible_dir }}/requirements.yml
+      -p {{ webhook_ansible_dir }}/collections
+  become: true
+  become_user: "{{ webhook_user }}"
+  register: webhook_galaxy
+  changed_when: "'Nothing to do' not in webhook_galaxy.stdout"
+
+- name: Install the deploy wrapper
+  ansible.builtin.template:
+    src: greener-deploy.sh.j2
+    dest: "{{ webhook_deploy_script }}"
+    owner: root
+    group: "{{ webhook_group }}"
+    mode: "0750"
+    validate: "bash -n %s"
+
+# Rendered as JSON from a template, then parsed back before it lands: a malformed hooks
+# file would leave the daemon refusing to start.
+- name: Deploy the hooks definition
+  ansible.builtin.template:
+    src: hooks.json.j2
+    dest: "{{ webhook_hooks_file }}"
+    owner: root
+    group: "{{ webhook_group }}"
+    mode: "0640"
+    validate: "python3 -c 'import json,sys; json.load(open(sys.argv[1]))' %s"
+  diff: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  notify: restart greener-webhook
+
+- name: Install the webhook systemd unit
+  ansible.builtin.template:
+    src: greener-webhook.service.j2
+    dest: "/etc/systemd/system/{{ webhook_service }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart greener-webhook
+
+- name: Ensure the webhook daemon is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ webhook_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true

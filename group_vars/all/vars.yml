@@ -17,6 +17,13 @@ backup_restic_password: "{{ vault_backup_restic_password }}"
 dockerhub_pull_user: "{{ vault_dockerhub_pull_user }}"
 dockerhub_pull_token: "{{ vault_dockerhub_pull_token }}"
 
+# CD contract with the CI. The pipeline POSTs the commit SHA that tags the image it just
+# published, authenticated by this token (the CI knows it as the VPS_DEPLOY_KEY repo
+# secret). Both the webhook trigger rule and the deploy playbook check the SHA against the
+# pattern, so a malformed payload is refused before anything runs.
+deploy_webhook_token: "{{ vault_deploy_webhook_token }}"
+deploy_version_pattern: "^[0-9a-f]{7,40}$"
+
 # AI service: names/values mirror the ai-service repo (.env.example + configs.py).
 # The old AI_PIPELINE_MODEL_NAME (image-classification pipeline) is gone: the service now
 # embeds images and searches a Qdrant vector store.

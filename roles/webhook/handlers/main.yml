@@ -1,0 +1,9 @@
+---
+# daemon_reload covers the unit itself changing; the hooks file needs a restart too since
+# the daemon is started without -hotreload (a bad reload should fail loudly, not silently
+# keep serving the old rules).
+- name: restart greener-webhook
+  ansible.builtin.systemd:
+    name: "{{ webhook_service }}"
+    state: restarted
+    daemon_reload: true
