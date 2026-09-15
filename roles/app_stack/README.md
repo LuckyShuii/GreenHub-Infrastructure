@@ -92,18 +92,23 @@ reload) and is a heavy build. Assumes the sibling-repo workspace layout.
 
 ## Pending / cross-team
 
-Blocking, on the AI repo (owned by Houssem — do not change it here):
+Blocks the first AI deploy, on the AI repo (owned by Houssem — do not change it here):
 
 - **`data/` is not in the image**: `dockerfile` copies `src/`, `main.py`, `configs.py` and
   `logging_config.py` but not `data/`, while `DATA_DIR=./data`. In prod the image is pulled
   with no source checkout, so region discovery raises `FileNotFoundError`, indexing is
   skipped and every request answers 404 "unknown region". Needs a `COPY ./data ./data`.
-  The dev compose works around it with a bind-mount, prod cannot.
-- **AI `/health`**: still no health endpoint; the `ai` container uses a stopgap TCP
-  port-liveness check. Replace with a real `/health` probe once it exists — and ideally move
-  the indexing off the lifespan so the probe means "serving", not "done indexing".
+  The dev compose works around it with a bind-mount, prod must not: shipping the region
+  files from here would put AI content under infra ownership and let it drift from the
+  image it is supposed to match. Keep `app_stack_enabled: false` for `ai` until it lands.
 
 Non-blocking:
+
+- **AI `/health`**: still no health endpoint; the TCP port-liveness check is a fine
+  stand-in — the port only opens once the app is serving. What it cannot express is
+  "serving but degraded", and because indexing runs in the lifespan the probe really means
+  "done indexing" on a cold start. It only starts to matter for the CD auto-rollback rule
+  (healthcheck KO > 2 min), which cannot judge a cold first boot behind a 20m start period.
 
 - **Image size**: `dockerfile` is single-stage (despite the `AS builder` label) and runs
   `uv sync --locked` without `--no-dev`, so pytest/ruff ship in the production image, on top
