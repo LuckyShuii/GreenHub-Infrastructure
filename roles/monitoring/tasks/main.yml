@@ -13,6 +13,26 @@
       `make vault-edit ENV={{ env_name | default('<env>') }}`.
     quiet: true
 
+# The pattern is anchored at BOTH ends on purpose. `is match` only anchors the start, so a
+# prefix-only check accepts a URL truncated mid-token, or one carrying the trailing newline
+# a paste into `vault-edit` leaves behind — both of which pass the assert and then fail as
+# an opaque HTTP 400 at the very end of the run. Fail here instead, where the cause is
+# obvious. quiet + a fail_msg naming no value: Ansible prints the unevaluated expression,
+# so a failure explains what to do without echoing the webhook into the log.
+- name: Assert the Discord alert webhook is available
+  ansible.builtin.assert:
+    that:
+      - discord_alert_webhook is defined
+      - discord_alert_webhook | trim is match(monitoring_alert_webhook_pattern)
+    fail_msg: >-
+      discord_alert_webhook is missing, truncated, or not a Discord webhook URL for this
+      environment. It must look like https://discord.com/api/webhooks/<id>/<token> with
+      nothing after the token. Create one in the #alerting channel (Edit channel ->
+      Integrations -> Webhooks), then set vault_discord_alert_webhook with
+      `make vault-edit ENV={{ env_name | default('<env>') }}`.
+    quiet: true
+  when: monitoring_alerting_enabled | bool
+
 - name: Ensure the monitoring directories exist
   ansible.builtin.file:
     path: "{{ item }}"
@@ -26,6 +46,7 @@
     - "{{ monitoring_grafana_provisioning_dir }}"
     - "{{ monitoring_grafana_provisioning_dir }}/datasources"
     - "{{ monitoring_grafana_provisioning_dir }}/dashboards"
+    - "{{ monitoring_alerting_dir }}"
     - "{{ monitoring_grafana_dashboards_dir }}"
 
 # Bind-mounted configs: compose sees no change when their content changes, so each one
@@ -75,6 +96,106 @@
     mode: "0644"
   notify: restart grafana
 
+# The contact point and the notification policy hold no secret (the webhook URL is
+# interpolated by Grafana from the 0600 env file), so they are ordinary 0644 configs.
+- name: Render the Grafana alerting contact point
+  ansible.builtin.template:
+    src: grafana-alerting-contactpoints.yml.j2
+    dest: "{{ monitoring_alerting_dir }}/contactpoints.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  register: monitoring_contactpoints_file
+  when: monitoring_alerting_enabled | bool
+  notify: restart grafana
+
+- name: Render the Grafana notification policy
+  ansible.builtin.template:
+    src: grafana-alerting-policies.yml.j2
+    dest: "{{ monitoring_alerting_dir }}/policies.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  when: monitoring_alerting_enabled | bool
+  notify: restart grafana
+
+# Rules are gated on alerting too: rules without a channel would evaluate and notify
+# nobody, which is worse than not having them — it looks like coverage.
+- name: Render the Grafana alert rules
+  ansible.builtin.template:
+    src: grafana-alerting-rules.yml.j2
+    dest: "{{ monitoring_alerting_dir }}/rules.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  when:
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_rules_enabled | bool
+  notify: restart grafana
+
+- name: Remove the alert rules file
+  ansible.builtin.file:
+    path: "{{ monitoring_alerting_dir }}/rules.yml"
+    state: absent
+  when:
+    - monitoring_alerting_enabled | bool
+    - not (monitoring_alert_rules_enabled | bool)
+  notify: restart grafana
+
+# Driven by the unwanted list, not by the enabled flag: disabling only the SILENCE rules
+# must delete those too, and dropping the file would have left them evaluating in Grafana's
+# database forever. Same wanted/unwanted shape as the Grafana accounts in users.yml.
+- name: Render the alert rules teardown
+  ansible.builtin.template:
+    src: grafana-alerting-rules-teardown.yml.j2
+    dest: "{{ monitoring_alerting_dir }}/rules-teardown.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  when:
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_unwanted_uids | length > 0
+  notify: restart grafana
+
+- name: Remove the alert rules teardown file
+  ansible.builtin.file:
+    path: "{{ monitoring_alerting_dir }}/rules-teardown.yml"
+    state: absent
+  when:
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_unwanted_uids | length == 0
+  notify: restart grafana
+
+# Enabled: make sure a teardown left over from a previous run is gone, or it would reset
+# the very policy just rendered above.
+- name: Remove the alerting teardown file
+  ansible.builtin.file:
+    path: "{{ monitoring_alerting_dir }}/teardown.yml"
+    state: absent
+  when: monitoring_alerting_enabled | bool
+  notify: restart grafana
+
+# Disabled: flipping the flag has to actually stop the notifications, not just stop
+# managing them — see the teardown template for why removing the files is not enough.
+- name: Tear the alerting configuration down
+  when: not (monitoring_alerting_enabled | bool)
+  block:
+    - name: Render the alerting teardown
+      ansible.builtin.template:
+        src: grafana-alerting-teardown.yml.j2
+        dest: "{{ monitoring_alerting_dir }}/teardown.yml"
+        owner: "{{ monitoring_owner }}"
+        group: "{{ monitoring_group }}"
+        mode: "0644"
+      notify: restart grafana
+
+    - name: Remove the alerting provisioning files
+      ansible.builtin.file:
+        path: "{{ monitoring_alerting_dir }}/{{ item }}"
+        state: absent
+      loop: [contactpoints.yml, policies.yml, rules.yml]
+      notify: restart grafana
+
 # diff: false + no_log → the admin password never reaches Ansible output; debug locally
 # with -e hide_secrets=false, never in CI.
 - name: Render the Grafana secrets file
@@ -86,6 +207,7 @@
     mode: "0600"
   diff: false
   no_log: "{{ hide_secrets | default(true) }}"
+  register: monitoring_env_file_state
   notify: restart grafana
 
 - name: Render the monitoring compose file
@@ -177,6 +299,14 @@
     wait_timeout: "{{ monitoring_wait_timeout | int }}"
   when: monitoring_enabled | bool
 
+# Handlers would otherwise run at the END of the play — after the checks below, which
+# would then verify a Grafana that has not reloaded the provisioning just rendered for it.
+# Compose only recreates a container when the compose FILE changes, and a bind-mounted
+# config changing is invisible to it, so without this the first deploy that adds a contact
+# point would check for it in a Grafana that never read it.
+- name: Apply pending container restarts before verifying
+  ansible.builtin.meta: flush_handlers
+
 # Loki is distroless and cannot carry a container healthcheck, so readiness is proven here
 # instead — and proven better: this asks Grafana to actually query the datasource, which
 # covers Grafana being up, Loki answering, and the provisioning having landed.
@@ -195,6 +325,72 @@
   changed_when: false
   no_log: "{{ hide_secrets | default(true) }}"
   when: monitoring_enabled | bool
+
+# Asks Grafana what it actually loaded, rather than trusting that the file is on disk:
+# an unparseable provisioning file leaves Grafana up and simply without the contact point.
+- name: Verify the Discord contact point is provisioned
+  ansible.builtin.uri:
+    url: "http://{{ monitoring_grafana_publish }}/api/v1/provisioning/contact-points"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: monitoring_contact_points
+  until: monitoring_alert_contact_point in
+         (monitoring_contact_points.json | default([]) | map(attribute='name') | list)
+  retries: 6
+  delay: 5
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  when:
+    - monitoring_enabled | bool
+    - monitoring_alerting_enabled | bool
+
+# A rule Grafana refused (a malformed query model, an unknown datasource) does not stop it
+# from starting: the rule is simply absent. Ask for the list and compare against the uids
+# this role claims to deploy, so a rejected rule fails the run instead of looking deployed.
+- name: Verify every alert rule is provisioned
+  ansible.builtin.uri:
+    url: "http://{{ monitoring_grafana_publish }}/api/v1/provisioning/alert-rules"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: monitoring_alert_rules
+  until: monitoring_alert_wanted_uids | difference(
+           monitoring_alert_rules.json | default([]) | map(attribute='uid') | list) | length == 0
+  retries: 6
+  delay: 5
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  when:
+    - monitoring_enabled | bool
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_wanted_uids | length > 0
+
+# Grafana holding a well-formed contact point proves nothing about the URL behind it: a
+# revoked or mistyped webhook fails only when something is finally sent. So send something
+# — but only when the webhook configuration changed, because this posts a real message and
+# a replay that changes nothing must leave the channel silent.
+- name: Send a test notification to the Discord channel
+  ansible.builtin.uri:
+    url: "{{ discord_alert_webhook | trim }}"
+    method: POST
+    body_format: json
+    body:
+      content: >-
+        Canal d'alerte GREENER opérationnel — environnement
+        {{ env_name | default('inconnu') }}, déployé depuis Ansible.
+    # Discord answers 204 with no body, 200 when ?wait=true is used.
+    status_code: [200, 204]
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  when:
+    - monitoring_enabled | bool
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_test_on_change | bool
+    - monitoring_contactpoints_file.changed | default(false) or
+      monitoring_env_file_state.changed | default(false)
 
 # Accounts come last: Grafana has to be answering before its API can be driven.
 # import_tasks, not include_tasks: a dynamic include applies its tags to the include

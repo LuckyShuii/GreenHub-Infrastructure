@@ -1,0 +1,132 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+#
+# Alert rules are code: provisioned by file, so a rule edited in the UI does not survive a
+# restart. Build a rule in the UI if that is easier, then export it in provisioning format
+# and commit it here — the UI is a drafting tool, this file is the truth.
+#
+# Everything here queries Loki, because Loki is the only datasource that exists yet. The
+# rules that really answer "is this container alive" need metrics (SCRUM-99).
+apiVersion: 1
+
+groups:
+  - orgId: {{ monitoring_grafana_org_id }}
+    name: greener-logs
+    folder: {{ monitoring_alert_rules_folder }}
+    interval: {{ monitoring_alert_rules_interval }}
+    rules:
+      # --- Too many errors ---------------------------------------------------------------
+      # One alert instance per service, because the query groups by service: Grafana turns
+      # each returned series into its own instance, and our notification policy groups on
+      # (alertname, env, service).
+      - uid: greener-error-rate
+        title: Taux d'erreurs anormal
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_error_range }}
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              # instant, not range: alerting wants one value per series, not a curve.
+              queryType: instant
+              expr: 'sum by (service, env) (count_over_time({env="{{ env_name }}", level="error"} [{{ monitoring_alert_error_window }}]))'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_error_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [{{ monitoring_alert_error_threshold }}]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        # No error lines at all means nothing is wrong, so silence must NOT alert here.
+        noDataState: OK
+        execErrState: Error
+        for: {{ monitoring_alert_error_for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: >-
+            Plus de {{ monitoring_alert_error_threshold }} erreurs en
+            {{ monitoring_alert_error_window }} sur ce service.
+        isPaused: false
+{% if monitoring_alert_silence_enabled | bool %}
+{% for svc in monitoring_alert_watched_services %}
+
+      # --- {{ svc }} has gone quiet ------------------------------------------------------
+      # Deliberately one rule PER SERVICE. A dead service stops producing a stream, so it
+      # disappears from an aggregated result rather than reporting zero — a single rule
+      # covering every service would never see one of them die. Here the disappearance
+      # becomes NoData on a rule that names {{ svc }}, and noDataState raises it.
+      - uid: greener-silent-{{ svc }}
+        title: Service {{ svc }} muet
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_silence_range }}
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              queryType: instant
+              expr: 'sum(count_over_time({env="{{ env_name }}", service="{{ svc }}"} [{{ monitoring_alert_silence_window }}]))'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_silence_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              # Catches a service still holding a stream but writing nothing. The total
+              # disappearance case is handled by noDataState below.
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        # THE point of this rule: silence is the symptom, so NoData must alert.
+        noDataState: Alerting
+        execErrState: Alerting
+        for: {{ monitoring_alert_silence_for }}
+        # Static labels, not query labels: on NoData the query returns no series and
+        # carries no labels, so without these the Discord message could not say WHICH
+        # service went quiet, and the notification policy could not group on it.
+        labels:
+          service: {{ svc }}
+          env: {{ env_name }}
+          severity: critical
+        annotations:
+          summary: >-
+            Aucun log de {{ svc }} depuis {{ monitoring_alert_silence_window }} —
+            le service est probablement arrêté.
+        isPaused: false
+{% endfor %}
+{% endif %}

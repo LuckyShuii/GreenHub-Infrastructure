@@ -1,0 +1,16 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+#
+# Rendered ONLY while monitoring_alerting_enabled is false. Deleting contactpoints.yml is
+# not enough to switch alerting off: Grafana stores provisioned resources in its own
+# database, so a contact point keeps existing — and keeps being notified — after its file
+# is gone. Resetting the root notification policy is what actually stops the routing; it
+# reverts to Grafana's built-in default receiver, which goes nowhere here (no SMTP).
+#
+# The contact point object itself is deliberately left in place rather than deleted: a
+# delete is refused while any policy still references it, and the ordering between the two
+# operations inside one provisioning pass is not guaranteed. An unreferenced contact point
+# receives nothing, so it is harmless.
+apiVersion: 1
+
+resetPolicies:
+  - {{ monitoring_grafana_org_id }}

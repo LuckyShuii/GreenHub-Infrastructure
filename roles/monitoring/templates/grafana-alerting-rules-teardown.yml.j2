@@ -1,0 +1,12 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+#
+# Rendered ONLY while the rules are disabled. Deleting rules.yml does not delete the rules:
+# Grafana keeps provisioned resources in its own database, so they would keep evaluating
+# and keep notifying. Naming them by uid is what actually removes them.
+apiVersion: 1
+
+deleteRules:
+{% for uid in monitoring_alert_unwanted_uids %}
+  - orgId: {{ monitoring_grafana_org_id }}
+    uid: {{ uid }}
+{% endfor %}
