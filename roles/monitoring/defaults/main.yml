@@ -135,3 +135,69 @@ monitoring_alert_repeat_interval: 4h
 # configuration actually changed. A replay that changes nothing must stay silent.
 monitoring_alert_test_on_change: true
 
+# --- Alert rules (SCRUM-131, first slice) -----------------------------------------------
+# Provisioned by file like everything else. Only Loki exists as a datasource today, so
+# these are log-based; the container-state rules arrive with the metrics stack (SCRUM-99).
+monitoring_alert_rules_enabled: true
+# Reuses the folder the dashboard provider already creates, so rule provisioning never has
+# to create one itself.
+monitoring_alert_rules_folder: GREENER
+monitoring_alert_rules_interval: 1m
+
+# Error-rate rule: how many error lines within the window is abnormal, per service.
+# 10 is a starting point for real traffic, to be retuned once there IS real traffic.
+# Note it will NOT fire on the synthetic generator, which averages ~2.5 error lines per
+# service per 5 min — that is expected, not a broken rule. To exercise the rule end to end,
+# deploy once with -e monitoring_alert_error_threshold=0.
+monitoring_alert_error_window: 5m
+monitoring_alert_error_threshold: 10
+monitoring_alert_error_for: 5m
+# Query time range in seconds. Must comfortably exceed the window above.
+monitoring_alert_error_range: 600
+
+# Silence rule = the provisional "service is down" proxy, and the reason there is ONE RULE
+# PER SERVICE: a dead service stops producing a Loki stream, so it vanishes from the result
+# set instead of reporting zero. A single rule aggregating every service would therefore
+# never notice one of them dying. Per-service rules turn that disappearance into NoData on
+# a named rule, which noDataState promotes to an alert.
+#
+# THE ASSUMPTION THIS RULE MAKES, AND WHY IT IS TIED TO THE GENERATOR:
+# it treats silence as death, which only holds for a source that logs unconditionally. The
+# generator does (1-5 lines per service per minute, no matter what). The real services do
+# NOT: a FastAPI backend logs on request, so at 03:00 with no users it emits nothing, and
+# this rule would page for a service that is perfectly healthy. Caddy and the AI service
+# behave the same, Postgres is near-silent at rest.
+#
+# So it defaults to following the generator: the day SCRUM-129 switches the sample logs off,
+# these rules disappear with them and cannot reach real traffic by forgetfulness. Real
+# "is this container alive" detection is SCRUM-99 — and the information already exists on
+# the host, since app_stack already defines Docker healthchecks for backend, postgres,
+# qdrant and ai. It is simply not exposed to Grafana yet.
+#
+# It is also slow by nature: it must wait out the window before it can conclude anything.
+monitoring_alert_silence_enabled: "{{ monitoring_sample_logs_enabled }}"
+# The services expected to be alive. Today that is what the generator fabricates; after
+# SCRUM-129 it becomes the real application services.
+monitoring_alert_watched_services: "{{ monitoring_sample_services }}"
+monitoring_alert_silence_window: 10m
+monitoring_alert_silence_for: 10m
+monitoring_alert_silence_range: 1800
+
+# Stable uids, split wanted/unwanted like the Grafana accounts in users.yml. Removing a
+# rule from the rendered file does NOT remove it from Grafana, which keeps provisioned
+# resources in its own database — so every uid this role knows must be either declared or
+# explicitly deleted. Without the unwanted list, turning the silence rules off would leave
+# them evaluating and notifying forever.
+monitoring_alert_silence_uids: >-
+  {{ monitoring_alert_watched_services | map('regex_replace', '^', 'greener-silent-') | list }}
+# Everything this role can deploy, whatever the current flags.
+monitoring_alert_all_uids: >-
+  {{ ['greener-error-rate'] + monitoring_alert_silence_uids }}
+# What rules.yml declares on this run.
+monitoring_alert_wanted_uids: >-
+  {{ (['greener-error-rate']
+      + (monitoring_alert_silence_enabled | bool | ternary(monitoring_alert_silence_uids, [])))
+     if monitoring_alert_rules_enabled | bool else [] }}
+# What must be deleted from Grafana on this run.
+monitoring_alert_unwanted_uids: >-
+  {{ monitoring_alert_all_uids | difference(monitoring_alert_wanted_uids) }}

@@ -119,6 +119,53 @@
   when: monitoring_alerting_enabled | bool
   notify: restart grafana
 
+# Rules are gated on alerting too: rules without a channel would evaluate and notify
+# nobody, which is worse than not having them — it looks like coverage.
+- name: Render the Grafana alert rules
+  ansible.builtin.template:
+    src: grafana-alerting-rules.yml.j2
+    dest: "{{ monitoring_alerting_dir }}/rules.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  when:
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_rules_enabled | bool
+  notify: restart grafana
+
+- name: Remove the alert rules file
+  ansible.builtin.file:
+    path: "{{ monitoring_alerting_dir }}/rules.yml"
+    state: absent
+  when:
+    - monitoring_alerting_enabled | bool
+    - not (monitoring_alert_rules_enabled | bool)
+  notify: restart grafana
+
+# Driven by the unwanted list, not by the enabled flag: disabling only the SILENCE rules
+# must delete those too, and dropping the file would have left them evaluating in Grafana's
+# database forever. Same wanted/unwanted shape as the Grafana accounts in users.yml.
+- name: Render the alert rules teardown
+  ansible.builtin.template:
+    src: grafana-alerting-rules-teardown.yml.j2
+    dest: "{{ monitoring_alerting_dir }}/rules-teardown.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  when:
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_unwanted_uids | length > 0
+  notify: restart grafana
+
+- name: Remove the alert rules teardown file
+  ansible.builtin.file:
+    path: "{{ monitoring_alerting_dir }}/rules-teardown.yml"
+    state: absent
+  when:
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_unwanted_uids | length == 0
+  notify: restart grafana
+
 # Enabled: make sure a teardown left over from a previous run is gone, or it would reset
 # the very policy just rendered above.
 - name: Remove the alerting teardown file
@@ -146,7 +193,7 @@
       ansible.builtin.file:
         path: "{{ monitoring_alerting_dir }}/{{ item }}"
         state: absent
-      loop: [contactpoints.yml, policies.yml]
+      loop: [contactpoints.yml, policies.yml, rules.yml]
       notify: restart grafana
 
 # diff: false + no_log → the admin password never reaches Ansible output; debug locally
@@ -298,6 +345,28 @@
   when:
     - monitoring_enabled | bool
     - monitoring_alerting_enabled | bool
+
+# A rule Grafana refused (a malformed query model, an unknown datasource) does not stop it
+# from starting: the rule is simply absent. Ask for the list and compare against the uids
+# this role claims to deploy, so a rejected rule fails the run instead of looking deployed.
+- name: Verify every alert rule is provisioned
+  ansible.builtin.uri:
+    url: "http://{{ monitoring_grafana_publish }}/api/v1/provisioning/alert-rules"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: monitoring_alert_rules
+  until: monitoring_alert_wanted_uids | difference(
+           monitoring_alert_rules.json | default([]) | map(attribute='uid') | list) | length == 0
+  retries: 6
+  delay: 5
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  when:
+    - monitoring_enabled | bool
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_wanted_uids | length > 0
 
 # Grafana holding a well-formed contact point proves nothing about the URL behind it: a
 # revoked or mistyped webhook fails only when something is finally sent. So send something

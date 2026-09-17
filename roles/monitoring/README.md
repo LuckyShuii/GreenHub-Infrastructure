@@ -165,6 +165,100 @@ make vault-edit ENV=production
 A missing or malformed value fails the run with an explanation rather than deploying a
 stack that cannot tell you anything.
 
+## Alert rules
+
+Rules are code, like the dashboards: `provisioning/alerting/rules.yml`, rendered from
+`monitoring_alert_rules_enabled`. If the UI is easier for drafting one, use it — then
+**Alerting → Alert rules → Export** in provisioning format, commit the YAML here, and
+delete the UI rule.
+
+Everything queries Loki, because Loki is the only datasource that exists yet. Real
+container-state rules need metrics ([SCRUM-99](https://greener-epitech.atlassian.net/browse/SCRUM-99)).
+
+| Rule | Fires when | `noDataState` |
+|---|---|---|
+| `greener-error-rate` | more than `monitoring_alert_error_threshold` error lines per service in the window | `OK` |
+| `greener-silent-<service>` | a watched service stops logging | `Alerting` |
+
+### Testing them while only fake logs exist
+
+`greener-error-rate` **will not fire** on the synthetic generator: it averages ~2.5 error
+lines per service per 5 min, well under the default threshold of 10. That is expected. To
+watch the whole path fire, deploy once with `-e monitoring_alert_error_threshold=0`.
+
+The silence rules are the better end-to-end test, because you control both directions:
+
+```bash
+sudo systemctl stop greener-logsample.timer    # ~10 min -> 4 FIRING alerts in Discord
+sudo systemctl start greener-logsample.timer   # -> the matching RESOLVED messages
+```
+
+`sudo` is not optional here. Named accounts get sudo from a NOPASSWD drop-in
+(`roles/common/tasks/sudoers.yml`) and are deliberately **not** in the `sudo` group, which
+is what polkit treats as administrator. A bare `systemctl stop` therefore falls through to
+polkit, which asks for the password of an account these key-only users do not have.
+
+### Why one silence rule per service
+
+A dead service stops producing a Loki stream, so it **disappears from the query result**
+rather than reporting zero. A single rule aggregating every service would therefore never
+notice one of them dying — the series it should complain about is simply not there.
+
+One rule per expected service turns that disappearance into `NoData` on a rule that already
+names the service, and `noDataState: Alerting` raises it. The expected list is declarative:
+
+```yaml
+monitoring_alert_watched_services: [backend, ai, postgres, caddy]
+```
+
+Their labels (`service`, `env`) are **static on the rule**, not taken from the query: on
+`NoData` there is no series and therefore no query labels, so without them the Discord
+message could not say *which* service went quiet and the notification policy could not
+group on it.
+
+### The assumption it makes, and why it is tied to the generator
+
+**It treats silence as death, which only holds for a source that logs unconditionally.**
+The generator does — 1 to 5 lines per service per minute, whatever happens. The real
+services do not: a FastAPI backend logs on request, so at 03:00 with no users it emits
+nothing and this rule would page for a service that is perfectly healthy. Caddy and the AI
+service behave the same way, and Postgres is near-silent at rest.
+
+So `monitoring_alert_silence_enabled` defaults to **following the generator**:
+
+```yaml
+monitoring_alert_silence_enabled: "{{ monitoring_sample_logs_enabled }}"
+```
+
+The day SCRUM-129 turns the sample logs off, these rules are deleted with them (by uid, see
+below) and cannot reach real traffic through forgetfulness. A pager that cries at 03:00 for
+a healthy service is worse than no pager at all — it teaches the team to ignore the channel.
+
+It is also slow by nature: it must wait out the window before it can conclude anything.
+
+### What actually detects a dead service
+
+`app_stack` **already defines Docker healthchecks** for `backend`, `postgres`, `qdrant` and
+`ai`. Docker probes them continuously, independently of traffic, and knows their state at
+every moment. The gap is not missing surveillance — it is that this state, which Docker
+already computes, is not exposed to Grafana. That is SCRUM-99, and it is why that ticket
+was pulled into V1.
+
+### Disabling them deletes them
+
+Same trap as the contact point: removing `rules.yml` does not remove the rules, Grafana
+keeps them in its database and they keep evaluating and notifying.
+`monitoring_alert_rules_enabled: false` therefore renders a teardown naming every uid in
+`deleteRules`. Apply that state **before** deleting rules from this role, or they live on
+with nothing left to manage them.
+
+### The run fails on a rule Grafana refused
+
+A malformed query model or an unknown datasource does not stop Grafana from starting — the
+rule is just absent. So the role asks for the list of provisioned rules and compares it
+against the uids it claims to deploy. A rejected rule fails the run instead of looking
+deployed.
+
 ## One Grafana account per person
 
 Datasources and dashboards are provisioned from files. **Users cannot be** — Grafana keeps
