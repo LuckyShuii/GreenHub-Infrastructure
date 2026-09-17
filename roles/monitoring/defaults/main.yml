@@ -1,2 +1,83 @@
 ---
-# Default vars for the monitoring role (to be filled).
+# Log stack: Loki (store) + Alloy (collector) + Grafana (UI), deployed with docker compose
+# in its OWN project, separate from app_stack — a monitoring change must never restart the
+# application, and an application deploy must never restart the observability stack.
+#
+# V1 scope (SCRUM-87): there is no VPN yet AND no application emitting logs yet, so
+#   * Grafana publishes on LOOPBACK only (reach it with an SSH tunnel, see README),
+#   * Alloy tails a synthetic log generator instead of real sources.
+# Binding to the VPN and wiring the real sources is the follow-up ticket (SCRUM-129).
+
+monitoring_enabled: true
+
+# On-host layout. Deliberately NOT /opt/greener: a separate compose project means a
+# separate directory, otherwise the two projects fight over docker-compose.yml.
+monitoring_dir: /opt/greener-monitoring
+monitoring_compose_file: "{{ monitoring_dir }}/docker-compose.yml"
+monitoring_env_file: "{{ monitoring_dir }}/.env"
+monitoring_config_dir: "{{ monitoring_dir }}/config"
+monitoring_grafana_provisioning_dir: "{{ monitoring_dir }}/grafana/provisioning"
+monitoring_grafana_dashboards_dir: "{{ monitoring_dir }}/grafana/dashboards"
+
+# Root-owned: unlike app_stack, nothing here is re-rendered by the non-human CD account.
+monitoring_owner: root
+monitoring_group: root
+
+# Isolated from greener_internal: the collector reaches log FILES on the host, not the
+# application containers, so the two networks have no reason to touch each other yet.
+monitoring_network: greener_monitoring
+
+# Pinned images — bump deliberately, never track a floating tag.
+monitoring_loki_image: "grafana/loki:3.7.7"
+# Alloy, not Promtail: Promtail reached end of life in March 2026 and Grafana's migration
+# path is Alloy. No point standing up a collector we would have to replace immediately.
+monitoring_alloy_image: "grafana/alloy:v1.19.2"
+monitoring_grafana_image: "grafana/grafana:13.2.2"
+
+monitoring_loki_port: 3100
+monitoring_grafana_port: 3000
+# Alloy's own UI/metrics endpoint; stays inside the compose network.
+monitoring_alloy_port: 12345
+
+# Grafana is the only service of this stack that publishes anything, and only on loopback,
+# so Caddy remains the single host-facing service. Reach it with an SSH tunnel:
+#   ssh -L 3000:127.0.0.1:3000 <user>@<vps>   then http://localhost:3000
+monitoring_grafana_publish: "127.0.0.1:{{ monitoring_grafana_port }}"
+
+# Public URL, used only when grafana_public is on (see group_vars/all/vars.yml). Grafana
+# needs to know its external origin or its redirects and asset links point at localhost.
+monitoring_grafana_root_url: "https://grafana.{{ caddy_domain }}/"
+
+monitoring_grafana_admin_user: admin
+
+# Loki retention. 7 days is plenty while the only producer is the sample generator; revisit
+# once the real services ship (and before the disk has an opinion about it).
+monitoring_loki_retention: "168h"
+
+monitoring_loki_data_volume: loki_data
+monitoring_grafana_data_volume: grafana_data
+monitoring_alloy_data_volume: alloy_data
+
+# --- Synthetic logs: temporary, SCRUM-87 only --------------------------------------------
+# Nothing real is running, so there is nothing to collect. A systemd timer fabricates lines
+# shaped like what the services will emit, purely to prove the chain end to end:
+#   file -> Alloy -> Loki -> Grafana. The follow-up ticket deletes this.
+monitoring_sample_logs_enabled: true
+monitoring_sample_log_dir: /var/log/greener-sample
+monitoring_sample_services: [backend, ai, postgres, caddy]
+monitoring_sample_levels: [debug, info, info, info, warn, error]
+monitoring_sample_messages:
+  - "request completed"
+  - "connection pool acquired"
+  - "cache miss, falling back to store"
+  - "slow query detected"
+  - "upstream returned a non-2xx status"
+  - "scheduled task finished"
+monitoring_sample_script: /usr/local/bin/greener-logsample
+monitoring_sample_unit: greener-logsample
+monitoring_sample_interval: "1min"
+# Lines kept per file: the generator trims itself, so a throwaway source needs no logrotate.
+monitoring_sample_max_lines: 2000
+
+# docker compose --wait budget for the bring-up (seconds).
+monitoring_wait_timeout: 300

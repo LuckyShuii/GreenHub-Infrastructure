@@ -26,6 +26,12 @@ caddy_acme_staging: true
 # The app_stack gateway's published loopback port (see app_stack_gateway_publish).
 caddy_backend_upstream: "127.0.0.1:8080"
 
+# Optional Grafana vhost, driven by the shared grafana_public toggle (group_vars/all).
+# Off by default: the monitoring role publishes Grafana on loopback and an SSH tunnel is
+# the intended access path until the VPN exists.
+caddy_grafana_enabled: "{{ grafana_public | default(false) }}"
+caddy_grafana_upstream: "127.0.0.1:3000"
+
 # On-host config layout (the caddy package owns /etc/caddy and this Caddyfile).
 caddy_config_dir: "/etc/caddy"
 caddy_caddyfile_path: "/etc/caddy/Caddyfile"

@@ -1,0 +1,62 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+# Single-binary Loki on local filesystem storage: one VPS, one tenant, no object store.
+# Sized for a single small host — revisit when the real services start shipping (SCRUM-129).
+
+# Single tenant, and the only clients are on the internal compose network.
+auth_enabled: false
+
+server:
+  http_listen_port: {{ monitoring_loki_port }}
+  # gRPC is unused in single-binary mode but the port must not collide; 0 lets it pick one.
+  grpc_listen_port: 0
+  log_level: info
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  # One instance, so no replication and the ring lives in memory.
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    # v13 + tsdb is the current schema. from: must stay in the PAST and must never be
+    # edited once data exists under it — add a new entry instead.
+    - from: 2026-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: {{ monitoring_loki_retention }}
+  # Refuse anything older than the retention window: a backfilled or clock-skewed line
+  # would otherwise be stored and immediately deleted.
+  reject_old_samples: true
+  reject_old_samples_max_age: {{ monitoring_loki_retention }}
+  allow_structured_metadata: true
+
+# Retention is only ENFORCED if the compactor runs with it enabled — limits_config alone
+# marks data as expired without ever deleting it.
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+
+# No usage telemetry to Grafana Labs.
+analytics:
+  reporting_enabled: false

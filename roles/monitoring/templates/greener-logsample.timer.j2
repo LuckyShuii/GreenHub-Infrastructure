@@ -1,0 +1,13 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+[Unit]
+Description=Run the GREENER synthetic log generator every {{ monitoring_sample_interval }}
+Documentation=https://greener-epitech.atlassian.net/browse/SCRUM-87
+
+[Timer]
+OnBootSec={{ monitoring_sample_interval }}
+OnUnitActiveSec={{ monitoring_sample_interval }}
+AccuracySec=10s
+Unit={{ monitoring_sample_unit }}.service
+
+[Install]
+WantedBy=timers.target

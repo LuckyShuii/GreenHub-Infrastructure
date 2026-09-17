@@ -1,6 +1,197 @@
 ---
-# monitoring role — valid stub. Real logic lands in a dedicated ticket.
-# The debug task is a no-op: stays "ok", never "changed" (idempotent).
-- name: Placeholder (no action)
-  ansible.builtin.debug:
-    msg: "Role {{ ansible_role_name }}: stub — nothing to do yet."
+# Requires the docker role (engine, compose plugin, python SDK) to have run first.
+# Its own compose project under {{ monitoring_dir }}, so it never restarts app_stack.
+
+- name: Assert the Grafana admin password is available
+  ansible.builtin.assert:
+    that:
+      - grafana_admin_password is defined
+      - grafana_admin_password | length >= 12
+    fail_msg: >-
+      grafana_admin_password is missing or too short for this environment. Generate one with
+      `openssl rand -base64 24`, then add it as vault_grafana_admin_password with
+      `make vault-edit ENV={{ env_name }}`.
+    quiet: true
+
+- name: Ensure the monitoring directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0755"
+  loop:
+    - "{{ monitoring_dir }}"
+    - "{{ monitoring_config_dir }}"
+    - "{{ monitoring_grafana_provisioning_dir }}"
+    - "{{ monitoring_grafana_provisioning_dir }}/datasources"
+    - "{{ monitoring_grafana_provisioning_dir }}/dashboards"
+    - "{{ monitoring_grafana_dashboards_dir }}"
+
+# Bind-mounted configs: compose sees no change when their content changes, so each one
+# notifies its own container explicitly.
+- name: Render the Loki configuration
+  ansible.builtin.template:
+    src: loki.yml.j2
+    dest: "{{ monitoring_config_dir }}/loki.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  notify: restart loki
+
+- name: Render the Alloy configuration
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: "{{ monitoring_config_dir }}/config.alloy"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  notify: restart alloy
+
+- name: Render the Grafana datasource provisioning
+  ansible.builtin.template:
+    src: grafana-datasource-loki.yml.j2
+    dest: "{{ monitoring_grafana_provisioning_dir }}/datasources/loki.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  notify: restart grafana
+
+- name: Deploy the Grafana dashboard provider
+  ansible.builtin.copy:
+    src: grafana/provisioning/dashboards/greener.yml
+    dest: "{{ monitoring_grafana_provisioning_dir }}/dashboards/greener.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  notify: restart grafana
+
+- name: Deploy the Grafana dashboards
+  ansible.builtin.copy:
+    src: grafana/dashboards/
+    dest: "{{ monitoring_grafana_dashboards_dir }}/"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  notify: restart grafana
+
+# diff: false + no_log → the admin password never reaches Ansible output; debug locally
+# with -e hide_secrets=false, never in CI.
+- name: Render the Grafana secrets file
+  ansible.builtin.template:
+    src: grafana.env.j2
+    dest: "{{ monitoring_env_file }}"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0600"
+  diff: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  notify: restart grafana
+
+- name: Render the monitoring compose file
+  ansible.builtin.template:
+    src: docker-compose.monitoring.yml.j2
+    dest: "{{ monitoring_compose_file }}"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+
+# --- Synthetic logs: temporary, removed by SCRUM-129 -------------------------------------
+- name: Install the synthetic log generator
+  when: monitoring_sample_logs_enabled | bool
+  tags: [monitoring, logsample]
+  block:
+    - name: Ensure the sample log directory exists
+      ansible.builtin.file:
+        path: "{{ monitoring_sample_log_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install the generator script
+      ansible.builtin.template:
+        src: greener-logsample.sh.j2
+        dest: "{{ monitoring_sample_script }}"
+        owner: root
+        group: root
+        mode: "0755"
+        validate: "bash -n %s"
+
+    - name: Install the generator unit and timer
+      ansible.builtin.template:
+        src: "{{ monitoring_sample_unit }}.{{ item }}.j2"
+        dest: "/etc/systemd/system/{{ monitoring_sample_unit }}.{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [service, timer]
+
+    - name: Enable the generator timer
+      ansible.builtin.systemd:
+        name: "{{ monitoring_sample_unit }}.timer"
+        enabled: true
+        state: started
+        daemon_reload: true
+
+# Flipping the flag has to actually clean the host, otherwise the follow-up ticket cannot
+# remove this code without leaving a timer running forever.
+- name: Remove the synthetic log generator
+  when: not (monitoring_sample_logs_enabled | bool)
+  tags: [monitoring, logsample]
+  block:
+    - name: Look for the generator timer
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/{{ monitoring_sample_unit }}.timer"
+      register: monitoring_sample_timer
+
+    - name: Stop and disable the generator timer
+      ansible.builtin.systemd:
+        name: "{{ monitoring_sample_unit }}.timer"
+        enabled: false
+        state: stopped
+      when: monitoring_sample_timer.stat.exists
+
+    - name: Remove the generator files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/etc/systemd/system/{{ monitoring_sample_unit }}.timer"
+        - "/etc/systemd/system/{{ monitoring_sample_unit }}.service"
+        - "{{ monitoring_sample_script }}"
+        - "{{ monitoring_sample_log_dir }}"
+      notify: reload systemd
+
+- name: Pull images and (re)start the monitoring stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_dir }}"
+    files:
+      - docker-compose.yml
+    pull: always
+    state: present
+    # Block until Loki and Grafana report healthy: a broken config must fail the run
+    # rather than leave a restart loop nobody looks at. Startup here is seconds, not the
+    # cold-start marathon that makes app_stack skip the wait.
+    wait: true
+    wait_timeout: "{{ monitoring_wait_timeout | int }}"
+  when: monitoring_enabled | bool
+
+# Loki is distroless and cannot carry a container healthcheck, so readiness is proven here
+# instead — and proven better: this asks Grafana to actually query the datasource, which
+# covers Grafana being up, Loki answering, and the provisioning having landed.
+# no_log hides the admin password; re-run with -e hide_secrets=false to see the response.
+- name: Verify Grafana can query Loki
+  ansible.builtin.uri:
+    url: "http://{{ monitoring_grafana_publish }}/api/datasources/uid/loki/health"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: monitoring_datasource_health
+  until: (monitoring_datasource_health.json | default({})).status | default('') == 'OK'
+  retries: 12
+  delay: 5
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  when: monitoring_enabled | bool

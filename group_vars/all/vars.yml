@@ -17,6 +17,13 @@ backup_restic_password: "{{ vault_backup_restic_password }}"
 dockerhub_pull_user: "{{ vault_dockerhub_pull_user }}"
 dockerhub_pull_token: "{{ vault_dockerhub_pull_token }}"
 
+# Observability. Grafana binds loopback only and is reached through an SSH tunnel; with no
+# VPN yet, a public vhost would be guarded by nothing but the Grafana admin password. Set
+# to true ONLY with a DNS record for grafana.<caddy_domain>, and drop it entirely once the
+# VPN lands (SCRUM-129). Shared here because caddy (vhost) and monitoring (root_url) both
+# need the same answer.
+grafana_public: false
+
 # AI service: names/values mirror the ai-service repo (.env.example + configs.py).
 # The old AI_PIPELINE_MODEL_NAME (image-classification pipeline) is gone: the service now
 # embeds images and searches a Qdrant vector store.

@@ -1,0 +1,17 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+# Provisioned datasource: Grafana is configured from files, never by hand in the UI, so a
+# rebuilt container comes back identical.
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    # Stable uid: the dashboards below reference it, so it must not be regenerated.
+    uid: loki
+    url: http://loki:{{ monitoring_loki_port }}
+    isDefault: true
+    # Idempotent provisioning: re-apply this file on every start, UI edits do not stick.
+    editable: false
+    jsonData:
+      maxLines: 1000
