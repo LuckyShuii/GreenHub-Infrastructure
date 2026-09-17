@@ -102,17 +102,25 @@ the prepared dashboard cannot chase down an unexpected problem. Our own dashboar
 locked (`allowUiUpdates: false`), so an Editor can build their own without being able to
 overwrite the provisioned ones.
 
-### Passwords
+### Passwords are managed state
 
-Everyone starts on the shared `grafana_user_initial_password` (per env, in the vault),
-handed out manually. **It is only ever applied at account creation** — the role never resets
-it afterwards, so someone who changes theirs keeps it. Per-login overrides go in
-`grafana_user_passwords` if distinct initial passwords are ever wanted.
+The password lives in the vault (`grafana_user_password` per env) and **the vault is the
+truth**: every replay restores it. Somebody who changes theirs in the UI has it reverted on
+the next deploy, and the run reports that as a change.
 
-The obvious limitation, accepted deliberately: until each person changes it, they all share
-the same password and could sign in as one another. Reaching Grafana still requires an SSH
-account on the VPS, which is its own gate. Replacing this with GitHub OAuth belongs with
-SCRUM-129, since OAuth wants the stable URL that the VPN will provide.
+Grafana never exposes the password hash, so "has it drifted?" is answered the only way
+available — by trying to authenticate as that user with the expected password. A 401 means
+drift and triggers the reset; a 200 means nothing to do. That keeps the task honestly
+idempotent rather than blindly resetting on every run.
+
+One honest limitation: Grafana OSS has no setting to hide the "change password" button, so
+a user can still change it. They simply do not get to keep it. If a person must truly keep
+their own password, give them a per-login entry in `grafana_user_passwords` instead of
+fighting the UI.
+
+The other accepted tradeoff: everyone shares the same password, so until that changes they
+could sign in as one another. Replacing this with GitHub OAuth belongs with SCRUM-129,
+since OAuth wants the stable URL the VPN will provide.
 
 ### Two gotchas
 

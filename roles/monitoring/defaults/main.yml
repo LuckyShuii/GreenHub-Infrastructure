@@ -93,8 +93,8 @@ monitoring_grafana_org_id: 1
 # sent to it (no SMTP configured), so a synthetic domain is honest: people sign in with
 # their login, not their address.
 monitoring_grafana_email_domain: "greener.local"
-# Per-login override of the initial password. Empty = everyone starts on
-# grafana_user_initial_password. Set it in an env vault if distinct ones are ever needed.
+# Per-login override. Empty = everyone gets grafana_user_password. Set it in an env vault
+# if distinct passwords are ever wanted; the enforcement below works the same either way.
 grafana_user_passwords: {}
 # Org roles Grafana accepts. Viewer cannot use Explore (ad-hoc log querying), which is
 # exactly what a dev needs during an incident — hence Editor for the devs, not Viewer.

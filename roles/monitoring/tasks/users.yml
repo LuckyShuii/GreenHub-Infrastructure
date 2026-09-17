@@ -48,8 +48,6 @@
     monitoring_grafana_by_login: >-
       {{ dict(monitoring_grafana_members.json | map(attribute='login') | zip(monitoring_grafana_members.json)) }}
 
-# Creation only — the password is never re-applied on later runs, so someone who changed
-# theirs keeps it.
 - name: Create the missing Grafana accounts
   ansible.builtin.uri:
     url: "{{ monitoring_grafana_api }}/api/admin/users"
@@ -59,7 +57,7 @@
       name: "{{ item.name }}"
       login: "{{ item.name }}"
       email: "{{ item.name }}@{{ monitoring_grafana_email_domain }}"
-      password: "{{ grafana_user_passwords[item.name] | default(grafana_user_initial_password, true) }}"
+      password: "{{ grafana_user_passwords[item.name] | default(grafana_user_password, true) }}"
     url_username: "{{ monitoring_grafana_admin_user }}"
     url_password: "{{ grafana_admin_password }}"
     force_basic_auth: true
@@ -108,6 +106,44 @@
   when:
     - item.name in monitoring_grafana_by_login
     - monitoring_grafana_by_login[item.name].role != item.grafana
+  changed_when: true
+  no_log: "{{ hide_secrets | default(true) }}"
+
+# The password is MANAGED STATE, not a one-off: the value in the vault is the truth, and a
+# replay restores it. Grafana never exposes the hash, so "has it drifted?" is answered the
+# only way available — by trying to authenticate as that user with the expected password.
+# That keeps the task honestly idempotent instead of resetting blindly on every run.
+- name: Check whether each account still has its configured password
+  ansible.builtin.uri:
+    url: "{{ monitoring_grafana_api }}/api/user"
+    url_username: "{{ item.name }}"
+    url_password: "{{ grafana_user_passwords[item.name] | default(grafana_user_password, true) }}"
+    force_basic_auth: true
+    status_code: [200, 401]
+  register: monitoring_grafana_pw_check
+  loop: "{{ monitoring_grafana_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: Restore the configured password where it drifted
+  ansible.builtin.uri:
+    url: "{{ monitoring_grafana_api }}/api/admin/users/{{ monitoring_grafana_by_login[item.item.name].userId }}/password"
+    method: PUT
+    body_format: json
+    body:
+      password: "{{ grafana_user_passwords[item.item.name] | default(grafana_user_password, true) }}"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  loop: "{{ monitoring_grafana_pw_check.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.status == 401
+    - item.item.name in monitoring_grafana_by_login
   changed_when: true
   no_log: "{{ hide_secrets | default(true) }}"
 
