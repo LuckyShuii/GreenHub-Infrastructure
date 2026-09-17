@@ -50,6 +50,10 @@ monitoring_grafana_root_url: "https://grafana.{{ caddy_domain }}/"
 
 monitoring_grafana_admin_user: admin
 
+# Session lifetime, applied only while grafana_public is on (see the compose file).
+# Grafana's own default is 30 days.
+monitoring_grafana_session_lifetime: "7d"
+
 # Loki retention. 7 days is plenty while the only producer is the sample generator; revisit
 # once the real services ship (and before the disk has an opinion about it).
 monitoring_loki_retention: "168h"

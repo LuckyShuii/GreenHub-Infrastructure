@@ -61,6 +61,18 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
 {% if grafana_public | default(false) | bool %}
       GF_SERVER_ROOT_URL: "{{ monitoring_grafana_root_url }}"
+      # Compensating controls for as long as this instance answers from the internet
+      # (SCRUM-133). Conditional on purpose: behind the VPN they would be noise, and their
+      # presence is the signal that the exposure is still on.
+      # Caddy already redirects HTTP to HTTPS, so marking the session cookie Secure costs
+      # nothing and closes the downgrade case.
+      GF_SECURITY_COOKIE_SECURE: "true"
+      # No outbound request per avatar. The accounts use synthetic @greener.local
+      # addresses, so nothing real would leak either way — this just stops the egress.
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      # Grafana defaults to 30 days, which is a long time for a stolen session on a
+      # publicly reachable instance.
+      GF_AUTH_LOGIN_MAXIMUM_LIFETIME_DURATION: "{{ monitoring_grafana_session_lifetime }}"
 {% endif %}
     volumes:
       - {{ monitoring_grafana_provisioning_dir }}:/etc/grafana/provisioning:ro
