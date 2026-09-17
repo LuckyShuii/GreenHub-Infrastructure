@@ -19,6 +19,23 @@
       {{ (system_users | selectattr('grafana', 'undefined') | list)
          + (system_users | selectattr('state', 'eq', 'absent') | selectattr('grafana', 'defined') | list) }}
 
+# One password per person, so a missing entry must stop the run. Falling back to a shared
+# value would silently hand several people the same credentials.
+- name: Assert every Grafana account has its own password
+  ansible.builtin.assert:
+    that:
+      - item.name in grafana_user_passwords
+      - grafana_user_passwords[item.name] | length >= 12
+    fail_msg: >-
+      {{ item.name }} carries a grafana: role but has no usable password in
+      vault_grafana_user_passwords. Add one with
+      `make vault-edit ENV={{ env_name | default('<env>') }}` before deploying.
+    quiet: true
+  loop: "{{ monitoring_grafana_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: "{{ hide_secrets | default(true) }}"
+
 - name: Assert every Grafana role is one Grafana knows
   ansible.builtin.assert:
     that:
@@ -57,7 +74,7 @@
       name: "{{ item.name }}"
       login: "{{ item.name }}"
       email: "{{ item.name }}@{{ monitoring_grafana_email_domain }}"
-      password: "{{ grafana_user_passwords[item.name] | default(grafana_user_password, true) }}"
+      password: "{{ grafana_user_passwords[item.name] }}"
     url_username: "{{ monitoring_grafana_admin_user }}"
     url_password: "{{ grafana_admin_password }}"
     force_basic_auth: true
@@ -117,7 +134,7 @@
   ansible.builtin.uri:
     url: "{{ monitoring_grafana_api }}/api/user"
     url_username: "{{ item.name }}"
-    url_password: "{{ grafana_user_passwords[item.name] | default(grafana_user_password, true) }}"
+    url_password: "{{ grafana_user_passwords[item.name] }}"
     force_basic_auth: true
     status_code: [200, 401]
   register: monitoring_grafana_pw_check
@@ -133,7 +150,7 @@
     method: PUT
     body_format: json
     body:
-      password: "{{ grafana_user_passwords[item.item.name] | default(grafana_user_password, true) }}"
+      password: "{{ grafana_user_passwords[item.item.name] }}"
     url_username: "{{ monitoring_grafana_admin_user }}"
     url_password: "{{ grafana_admin_password }}"
     force_basic_auth: true

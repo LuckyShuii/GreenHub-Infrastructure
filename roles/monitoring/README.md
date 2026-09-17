@@ -102,11 +102,24 @@ the prepared dashboard cannot chase down an unexpected problem. Our own dashboar
 locked (`allowUiUpdates: false`), so an Editor can build their own without being able to
 overwrite the provisioned ones.
 
-### Passwords are managed state
+### One password per person, managed state
 
-The password lives in the vault (`grafana_user_password` per env) and **the vault is the
-truth**: every replay restores it. Somebody who changes theirs in the UI has it reverted on
-the next deploy, and the run reports that as a change.
+Each account has **its own** password, in the env vault:
+
+```yaml
+# inventories/<env>/group_vars/all/vault.yml   (encrypted)
+vault_grafana_user_passwords:
+  lboillot: "..."
+  ecouy: "..."
+```
+
+**The vault is the truth and every replay restores it.** Somebody who changes theirs in the
+UI has it reverted on the next deploy, and the run reports that as a change. Hand the
+passwords out yourself; read them with `make vault-edit ENV=<env>`.
+
+There is **no shared fallback**. An account carrying a `grafana:` role with no entry in the
+map fails the run with its login named — quietly giving two people the same credentials
+would defeat the point of per-person accounts.
 
 Grafana never exposes the password hash, so "has it drifted?" is answered the only way
 available — by trying to authenticate as that user with the expected password. A 401 means
@@ -114,13 +127,7 @@ drift and triggers the reset; a 200 means nothing to do. That keeps the task hon
 idempotent rather than blindly resetting on every run.
 
 One honest limitation: Grafana OSS has no setting to hide the "change password" button, so
-a user can still change it. They simply do not get to keep it. If a person must truly keep
-their own password, give them a per-login entry in `grafana_user_passwords` instead of
-fighting the UI.
-
-The other accepted tradeoff: everyone shares the same password, so until that changes they
-could sign in as one another. Replacing this with GitHub OAuth belongs with SCRUM-129,
-since OAuth wants the stable URL the VPN will provide.
+a user can still change it. They simply do not get to keep it.
 
 ### Two gotchas
 

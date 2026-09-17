@@ -10,7 +10,7 @@
     fail_msg: >-
       grafana_admin_password is missing or too short for this environment. Generate one with
       `openssl rand -base64 24`, then add it as vault_grafana_admin_password with
-      `make vault-edit ENV={{ env_name }}`.
+      `make vault-edit ENV={{ env_name | default('<env>') }}`.
     quiet: true
 
 - name: Ensure the monitoring directories exist
