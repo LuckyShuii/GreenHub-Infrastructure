@@ -43,19 +43,52 @@ application containers, so the two have no reason to touch yet. SCRUM-129 attach
 
 ## Reaching Grafana
 
-No VPN yet, so Grafana publishes on loopback only and Caddy stays the single host-facing
-service. Open a tunnel from your workstation:
+The container publishes on the loopback only. The shared `grafana_public` toggle in
+`group_vars/all/vars.yml` decides whether **Caddy** additionally serves it at
+`grafana.<caddy_domain>`; the role consumes the same answer for Grafana's root URL and for
+the hardening below.
+
+Either way the tunnel always works:
 
 ```bash
 ssh -L 3000:127.0.0.1:3000 lboillot@<vps>
 # then browse http://localhost:3000  (user: admin, password: vault_grafana_admin_password)
 ```
 
-A public vhost (`grafana.<caddy_domain>`) exists behind the shared `grafana_public` toggle
-in `group_vars/all/vars.yml`, consumed by both this role (Grafana's root URL) and the
-`caddy` role (the vhost itself). **It is off by default and should stay off**: without the
-VPN its only protection is the Grafana admin password. Turning it on also requires a DNS
-record, or ACME cannot issue the certificate.
+### The public vhost is ON, deliberately
+
+`grafana_public: true` today — an **accepted risk**, not an oversight, recorded in
+[SCRUM-133](https://greener-epitech.atlassian.net/browse/SCRUM-133). It stays on until
+OpenVPN is configured ([SCRUM-58](https://greener-epitech.atlassian.net/browse/SCRUM-58)):
+making seven people open a tunnel for every glance at a dashboard is not workable during
+development.
+
+What already protects it — verified, not assumed:
+
+| | |
+|---|---|
+| Brute force | Grafana OSS blocks login 5 min after 5 failed attempts, **on by default** |
+| Transport | the vhost imports `security_headers`: HSTS, `X-Frame-Options: DENY`, `nosniff`, no `Server` |
+| Credentials | one vault password per person, 12 chars minimum enforced by an `assert`, no shared fallback |
+| Signup | `GF_USERS_ALLOW_SIGN_UP: false`, no telemetry egress |
+| Identities | synthetic `@greener.local` addresses, so no real address is exposed |
+
+The toggle also renders three compensating settings — `cookie_secure`, `disable_gravatar`
+and a 7-day session lifetime (`monitoring_grafana_session_lifetime`) — that are
+deliberately **not** rendered when it is off. Their presence in the running config is the
+signal that the exposure is still on.
+
+**The residual risk none of this covers** is a Grafana CVE being reachable from the
+internet. Only the network restriction fixes that, which is what makes SCRUM-58 and then
+[SCRUM-129](https://greener-epitech.atlassian.net/browse/SCRUM-129) — Grafana bound to the
+VPN IP, this variable deleted — the real answer rather than a nice-to-have.
+
+A basic-auth gate in Caddy was considered and dropped: it would shield Grafana even against
+a CVE, but at the cost of a second credential to distribute to seven people. Reconsider it
+if the VPN slips.
+
+While on, the vhost needs a DNS record for `grafana.<caddy_domain>` or ACME cannot issue the
+certificate. All four project subdomains already resolve to the VPS.
 
 ## Secrets
 
