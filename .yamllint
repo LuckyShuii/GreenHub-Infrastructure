@@ -11,3 +11,10 @@ rules:
   comments:
     min-spaces-from-content: 1
   comments-indentation: disable
+  # Required verbatim by ansible-lint: a mismatch here makes it refuse to run its --fix
+  # mode and warn on every invocation.
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true

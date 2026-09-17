@@ -2,7 +2,7 @@
 # Apply config changes at runtime with ZERO downtime: `systemctl reload caddy` runs the
 # unit's ExecReload (`caddy reload`), which hot-swaps the config without dropping
 # connections and without re-running ACME. Never a restart.
-- name: reload caddy
+- name: Reload caddy
   ansible.builtin.systemd:
     name: caddy
     state: reloaded

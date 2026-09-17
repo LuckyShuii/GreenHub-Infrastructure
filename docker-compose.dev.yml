@@ -1,3 +1,4 @@
+---
 # Dev stack: builds backend + ai from the sibling repos; only the gateway is published.
 # Mirrors roles/app_stack/templates/docker-compose.prod.yml.j2 — a change here usually
 # belongs there too (and vice versa).
@@ -62,7 +63,12 @@ services:
       - greener_internal
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)\""]
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200
+          else 1)"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -84,7 +90,14 @@ services:
     restart: unless-stopped
     # No curl/wget in the image: speak HTTP over bash's /dev/tcp.
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333; printf 'GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3"]
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/6333;
+          printf 'GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
+          grep -q '200 OK' <&3
       interval: 15s
       timeout: 5s
       retries: 5

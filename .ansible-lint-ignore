@@ -1,0 +1,24 @@
+# Targeted per-file, per-rule exclusions. Deliberately NOT a global skip_list: the profile
+# stays `production` and every other file is still held to it. Each entry below is a case
+# where the rule is wrong for this repository, not a rule we could not be bothered to meet.
+
+# ansible-vault ciphertext. The file IS the encrypted blob — there is no place to put a
+# `---` document marker without corrupting it.
+inventories/production/group_vars/all/vault.yml yaml[document-start]
+inventories/staging/group_vars/all/vault.yml yaml[document-start]
+
+# "Refresh APT cache after repository change" must run WHERE IT IS WRITTEN: it sits between
+# adding the upstream repo and installing from it. A handler fires at the end of the play,
+# so the install right below would run against a stale cache and pick the wrong version (or
+# fail outright). The rule assumes a changed-when task is always deferrable; here it is not.
+roles/caddy/tasks/main.yml no-handler
+roles/docker/tasks/main.yml no-handler
+
+# `system_users`, `greener_group` and `greener_shared_dir` are CROSS-ROLE by design:
+# group_vars/all/users.yml is the single declarative source of accounts, and both `common`
+# (system accounts) and `monitoring` (Grafana accounts) read it. Same for
+# `grafana_user_passwords`, which comes from the vault indirection in group_vars, not from
+# the role. The rule assumes role-private variables; prefixing these with `common_` or
+# `monitoring_` would break that contract and lie about where they come from.
+roles/common/defaults/main.yml var-naming[no-role-prefix]
+roles/monitoring/defaults/main.yml var-naming[no-role-prefix]

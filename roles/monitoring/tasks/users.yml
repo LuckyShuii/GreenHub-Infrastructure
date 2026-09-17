@@ -103,7 +103,8 @@
 - name: Re-index the org members by login
   ansible.builtin.set_fact:
     monitoring_grafana_by_login: >-
-      {{ dict(monitoring_grafana_members_after.json | map(attribute='login') | zip(monitoring_grafana_members_after.json)) }}
+      {{ dict(monitoring_grafana_members_after.json | map(attribute='login')
+              | zip(monitoring_grafana_members_after.json)) }}
 
 # Only where the role actually differs, so a replay reports no change.
 - name: Apply each account's Grafana role
@@ -146,7 +147,9 @@
 
 - name: Restore the configured password where it drifted
   ansible.builtin.uri:
-    url: "{{ monitoring_grafana_api }}/api/admin/users/{{ monitoring_grafana_by_login[item.item.name].userId }}/password"
+    url: >-
+      {{ monitoring_grafana_api }}/api/admin/users/{{
+      monitoring_grafana_by_login[item.item.name].userId }}/password
     method: PUT
     body_format: json
     body:

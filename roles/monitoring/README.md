@@ -135,7 +135,7 @@ it entirely.
 ### Handlers are flushed before verifying
 
 Compose only recreates a container when the compose *file* changes, and a bind-mounted
-config changing is invisible to it — so the render tasks notify `restart grafana`. Handlers
+config changing is invisible to it — so the render tasks notify `Restart grafana`. Handlers
 normally run at the very end of the play, i.e. *after* these checks, which would then
 inspect a Grafana that had not yet read the file just written for it. An explicit
 `meta: flush_handlers` sits between the bring-up and the verifications. This also fixes the
@@ -361,7 +361,7 @@ tail -f /var/log/greener-sample/backend.log
 ## Bind-mounted configs need explicit restarts
 
 Compose sees no change when the *content* of a bind-mounted file changes, so each render
-task notifies its own container (`restart loki` / `restart alloy` / `restart grafana`)
+task notifies its own container (`Restart loki` / `Restart alloy` / `Restart grafana`)
 rather than relying on the bring-up to notice.
 
 ## Loki configuration notes

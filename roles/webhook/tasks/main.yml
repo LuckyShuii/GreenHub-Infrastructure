@@ -160,7 +160,7 @@
     validate: "python3 -c 'import json,sys; json.load(open(sys.argv[1]))' %s"
   diff: false
   no_log: "{{ hide_secrets | default(true) }}"
-  notify: restart greener-webhook
+  notify: Restart greener-webhook
 
 - name: Install the webhook systemd unit
   ansible.builtin.template:
@@ -169,7 +169,7 @@
     owner: root
     group: root
     mode: "0644"
-  notify: restart greener-webhook
+  notify: Restart greener-webhook
 
 - name: Ensure the webhook daemon is enabled and started
   ansible.builtin.systemd:

@@ -70,7 +70,7 @@
     group: root
     mode: "0644"
     validate: "caddy validate --adapter caddyfile --config %s"
-  notify: reload caddy
+  notify: Reload caddy
 
 - name: Ensure Caddy service is enabled and started
   ansible.builtin.service:
