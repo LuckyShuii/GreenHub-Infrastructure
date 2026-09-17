@@ -11,7 +11,10 @@
     runas: "ALL:ALL"
     commands: ALL
     nopassword: "{{ item.sudo_nopassword | default(true) }}"
-    state: "{{ 'present' if (item.sudo | default(false)) and ((item.state | default('present')) == 'present') else 'absent' }}"
+    state: >-
+      {{ 'present'
+         if (item.sudo | default(false)) and ((item.state | default('present')) == 'present')
+         else 'absent' }}
     validation: required
   loop: "{{ system_users }}"
   loop_control:

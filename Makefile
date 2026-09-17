@@ -13,7 +13,7 @@ CONNECT := $(if $(BOOTSTRAP),-e ansible_user=ubuntu)
 .PHONY: deps lint check deploy ping vault-edit vault-rekey
 
 deps: ## Install pinned collections
-	ansible-galaxy collection install -r requirements.yml
+	ansible-galaxy collection install -r requirements.yml -p ./.ansible/collections
 
 lint: ## Run yamllint + ansible-lint
 	yamllint .

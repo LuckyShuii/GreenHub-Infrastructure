@@ -4,7 +4,9 @@
   ansible.builtin.group:
     name: "{{ item }}"
     state: present
-  loop: "{{ system_users | selectattr('groups', 'defined') | map(attribute='groups') | flatten | unique | reject('equalto', 'sudo') | list }}"
+  loop: >-
+    {{ system_users | selectattr('groups', 'defined') | map(attribute='groups')
+       | flatten | unique | reject('equalto', 'sudo') | list }}
   loop_control:
     label: "{{ item }}"
 

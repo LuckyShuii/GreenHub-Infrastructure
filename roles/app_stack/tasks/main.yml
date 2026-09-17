@@ -63,7 +63,7 @@
     owner: "{{ app_stack_owner }}"
     group: "{{ app_stack_group }}"
     mode: "0644"
-  notify: restart gateway
+  notify: Restart gateway
 
 - name: Deploy the postgres init scripts
   ansible.builtin.copy:

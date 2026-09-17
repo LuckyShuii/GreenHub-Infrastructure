@@ -1,3 +1,4 @@
+---
 # Managed by Ansible (monitoring role) — do not edit on the host.
 # Points Grafana at the dashboard JSON files bind-mounted from the repo.
 apiVersion: 1

@@ -58,7 +58,7 @@
     owner: "{{ monitoring_owner }}"
     group: "{{ monitoring_group }}"
     mode: "0644"
-  notify: restart loki
+  notify: Restart loki
 
 - name: Render the Alloy configuration
   ansible.builtin.template:
@@ -67,7 +67,7 @@
     owner: "{{ monitoring_owner }}"
     group: "{{ monitoring_group }}"
     mode: "0644"
-  notify: restart alloy
+  notify: Restart alloy
 
 - name: Render the Grafana datasource provisioning
   ansible.builtin.template:
@@ -76,7 +76,7 @@
     owner: "{{ monitoring_owner }}"
     group: "{{ monitoring_group }}"
     mode: "0644"
-  notify: restart grafana
+  notify: Restart grafana
 
 - name: Deploy the Grafana dashboard provider
   ansible.builtin.copy:
@@ -85,7 +85,7 @@
     owner: "{{ monitoring_owner }}"
     group: "{{ monitoring_group }}"
     mode: "0644"
-  notify: restart grafana
+  notify: Restart grafana
 
 - name: Deploy the Grafana dashboards
   ansible.builtin.copy:
@@ -94,7 +94,7 @@
     owner: "{{ monitoring_owner }}"
     group: "{{ monitoring_group }}"
     mode: "0644"
-  notify: restart grafana
+  notify: Restart grafana
 
 # The contact point and the notification policy hold no secret (the webhook URL is
 # interpolated by Grafana from the 0600 env file), so they are ordinary 0644 configs.
@@ -107,7 +107,7 @@
     mode: "0644"
   register: monitoring_contactpoints_file
   when: monitoring_alerting_enabled | bool
-  notify: restart grafana
+  notify: Restart grafana
 
 - name: Render the Grafana notification policy
   ansible.builtin.template:
@@ -117,7 +117,7 @@
     group: "{{ monitoring_group }}"
     mode: "0644"
   when: monitoring_alerting_enabled | bool
-  notify: restart grafana
+  notify: Restart grafana
 
 # Rules are gated on alerting too: rules without a channel would evaluate and notify
 # nobody, which is worse than not having them — it looks like coverage.
@@ -131,7 +131,7 @@
   when:
     - monitoring_alerting_enabled | bool
     - monitoring_alert_rules_enabled | bool
-  notify: restart grafana
+  notify: Restart grafana
 
 - name: Remove the alert rules file
   ansible.builtin.file:
@@ -140,7 +140,7 @@
   when:
     - monitoring_alerting_enabled | bool
     - not (monitoring_alert_rules_enabled | bool)
-  notify: restart grafana
+  notify: Restart grafana
 
 # Driven by the unwanted list, not by the enabled flag: disabling only the SILENCE rules
 # must delete those too, and dropping the file would have left them evaluating in Grafana's
@@ -155,7 +155,7 @@
   when:
     - monitoring_alerting_enabled | bool
     - monitoring_alert_unwanted_uids | length > 0
-  notify: restart grafana
+  notify: Restart grafana
 
 - name: Remove the alert rules teardown file
   ansible.builtin.file:
@@ -164,7 +164,7 @@
   when:
     - monitoring_alerting_enabled | bool
     - monitoring_alert_unwanted_uids | length == 0
-  notify: restart grafana
+  notify: Restart grafana
 
 # Enabled: make sure a teardown left over from a previous run is gone, or it would reset
 # the very policy just rendered above.
@@ -173,7 +173,7 @@
     path: "{{ monitoring_alerting_dir }}/teardown.yml"
     state: absent
   when: monitoring_alerting_enabled | bool
-  notify: restart grafana
+  notify: Restart grafana
 
 # Disabled: flipping the flag has to actually stop the notifications, not just stop
 # managing them — see the teardown template for why removing the files is not enough.
@@ -187,14 +187,14 @@
         owner: "{{ monitoring_owner }}"
         group: "{{ monitoring_group }}"
         mode: "0644"
-      notify: restart grafana
+      notify: Restart grafana
 
     - name: Remove the alerting provisioning files
       ansible.builtin.file:
         path: "{{ monitoring_alerting_dir }}/{{ item }}"
         state: absent
       loop: [contactpoints.yml, policies.yml, rules.yml]
-      notify: restart grafana
+      notify: Restart grafana
 
 # diff: false + no_log → the admin password never reaches Ansible output; debug locally
 # with -e hide_secrets=false, never in CI.
@@ -208,7 +208,7 @@
   diff: false
   no_log: "{{ hide_secrets | default(true) }}"
   register: monitoring_env_file_state
-  notify: restart grafana
+  notify: Restart grafana
 
 - name: Render the monitoring compose file
   ansible.builtin.template:
@@ -283,7 +283,7 @@
         - "/etc/systemd/system/{{ monitoring_sample_unit }}.service"
         - "{{ monitoring_sample_script }}"
         - "{{ monitoring_sample_log_dir }}"
-      notify: reload systemd
+      notify: Reload systemd
 
 - name: Pull images and (re)start the monitoring stack
   community.docker.docker_compose_v2:

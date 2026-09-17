@@ -1,7 +1,7 @@
 ---
 # Configs are bind-mounted, so compose sees no change when they do: each container is
 # restarted explicitly by the task that rendered its config.
-- name: restart loki
+- name: Restart loki
   community.docker.docker_compose_v2:
     project_src: "{{ monitoring_dir }}"
     files:
@@ -11,7 +11,7 @@
     state: restarted
   when: monitoring_enabled | bool
 
-- name: restart alloy
+- name: Restart alloy
   community.docker.docker_compose_v2:
     project_src: "{{ monitoring_dir }}"
     files:
@@ -21,7 +21,7 @@
     state: restarted
   when: monitoring_enabled | bool
 
-- name: restart grafana
+- name: Restart grafana
   community.docker.docker_compose_v2:
     project_src: "{{ monitoring_dir }}"
     files:
@@ -31,6 +31,6 @@
     state: restarted
   when: monitoring_enabled | bool
 
-- name: reload systemd
+- name: Reload systemd
   ansible.builtin.systemd:
     daemon_reload: true

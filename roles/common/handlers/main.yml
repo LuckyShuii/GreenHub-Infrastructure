@@ -1,6 +1,6 @@
 ---
 # No services to restart from common yet. Handler pattern (for later):
-# - name: restart <service>
+# - name: Restart <service>
 #   ansible.builtin.service:
 #     name: <service>
 #     state: restarted
