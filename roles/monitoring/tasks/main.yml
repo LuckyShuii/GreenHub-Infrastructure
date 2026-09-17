@@ -197,8 +197,11 @@
   when: monitoring_enabled | bool
 
 # Accounts come last: Grafana has to be answering before its API can be driven.
+# import_tasks, not include_tasks: a dynamic include applies its tags to the include
+# statement only, so --tags grafana-users would match the include and then skip every task
+# inside it. A static import propagates the tags, like roles/common/tasks/main.yml does.
 - name: Manage the Grafana accounts
-  ansible.builtin.include_tasks: users.yml
+  ansible.builtin.import_tasks: users.yml
   tags: [monitoring, grafana-users]
   when:
     - monitoring_enabled | bool
