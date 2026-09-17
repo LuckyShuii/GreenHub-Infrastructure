@@ -1,0 +1,24 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+#
+# Provisioning the root policy REPLACES Grafana's built-in default route, which points at
+# an email contact point that does not exist here (no SMTP is configured). That is the
+# intent: everything this stack raises goes to one Discord channel, and nothing can be
+# raised to a receiver nobody reads.
+apiVersion: 1
+
+policies:
+  - orgId: {{ monitoring_grafana_org_id }}
+    receiver: {{ monitoring_alert_contact_point }}
+    # One notification per (rule, env, service) rather than one per firing series: a rule
+    # that matches six containers must not post six messages.
+    group_by:
+{% for label in monitoring_alert_group_by %}
+      - {{ label }}
+{% endfor %}
+    # Wait before the first notification, so alerts that fire together arrive together.
+    group_wait: {{ monitoring_alert_group_wait }}
+    # Minimum gap before notifying again about a group that gained a new alert.
+    group_interval: {{ monitoring_alert_group_interval }}
+    # Re-notify about a still-firing group only this often. Deliberately long: the point is
+    # to be reminded, not to be drowned while already fixing the thing.
+    repeat_interval: {{ monitoring_alert_repeat_interval }}

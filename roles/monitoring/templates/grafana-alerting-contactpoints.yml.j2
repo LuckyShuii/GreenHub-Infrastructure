@@ -1,0 +1,26 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+#
+# Contains NO secret. Grafana interpolates $VAR inside provisioning files, so the webhook
+# URL is read from {{ monitoring_env_file }} (0600) at load time, and this file stays 0644
+# and fully visible in --check --diff.
+apiVersion: 1
+
+contactPoints:
+  - orgId: {{ monitoring_grafana_org_id }}
+    name: {{ monitoring_alert_contact_point }}
+    receivers:
+      - uid: {{ monitoring_alert_contact_point }}
+        type: discord
+        # false on purpose: Grafana then also sends a RESOLVED message. A channel that only
+        # ever fires tells you an incident started but never that it ended.
+        disableResolveMessage: false
+        settings:
+          url: ${{ monitoring_alert_webhook_env }}
+          # The values below are GO templates for Grafana, not Jinja: wrapped in raw so
+          # Ansible ships them verbatim. The status prefix is what makes a firing and a
+          # resolved message tellable apart at a glance in the channel.
+          title: '{% raw %}[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{% endraw %}'
+          # default.message lists, for every alert in the group, its labels (env, service)
+          # and its annotations. Those labels come from the rules themselves (SCRUM-131) —
+          # which is why those rules must carry env and service for this to read well.
+          message: '{% raw %}{{ template "default.message" . }}{% endraw %}'
