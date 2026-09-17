@@ -36,6 +36,27 @@ pip install ansible ansible-lint yamllint   # ansible-lint & yamllint are needed
 make deps                                    # install pinned collections
 ```
 
+## SSH access (one-time, per developer)
+
+No `ansible_user` is set in the repo: Ansible leaves the account to the SSH client, so you
+connect — and sudo — under **your own** `users.yml` account. Declare it once in
+`~/.ssh/config`, replacing the login with yours (`lboillot`, `ocorral`, ...):
+
+```
+Host greener-prod 51.255.169.129
+  User lboillot
+  IdentityFile ~/.ssh/id_ed25519
+```
+
+Check it with `make ping ENV=production`. A **fresh** VPS has no `users.yml` account yet —
+`common` is what creates them — so the very first run goes through the image's built-in
+account instead:
+
+```bash
+make deploy ENV=production BOOTSTRAP=1   # connects as `ubuntu`, creates every account
+make ping ENV=production                 # subsequent runs use your own account
+```
+
 ## Environments
 
 The environment is **always explicit**. `ansible.cfg` has no default inventory and the
