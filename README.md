@@ -26,8 +26,9 @@ roles/
   docker/                        # REAL: Docker Engine + compose plugin (official APT repo)
   app_stack/                     # REAL: renders + runs the app docker compose stack
   caddy/                         # REAL: host-facing reverse proxy (TLS), proxies to the gateway
+  monitoring/                    # REAL: centralised logs (Loki + Alloy + Grafana), own compose project
   webhook/                       # REAL: CD receiver (adnanh/webhook) + the local deploy tooling
-  firewall/ ssh/ openvpn/ monitoring/ backups/   # valid stubs
+  firewall/ ssh/ openvpn/ backups/               # valid stubs
 ```
 
 ## Prerequisites
@@ -35,6 +36,27 @@ roles/
 ```bash
 pip install ansible ansible-lint yamllint   # ansible-lint & yamllint are needed for `make lint`
 make deps                                    # install pinned collections
+```
+
+## SSH access (one-time, per developer)
+
+No `ansible_user` is set in the repo: Ansible leaves the account to the SSH client, so you
+connect — and sudo — under **your own** `users.yml` account. Declare it once in
+`~/.ssh/config`, replacing the login with yours (`lboillot`, `ocorral`, ...):
+
+```
+Host greener-prod 51.255.169.129
+  User lboillot
+  IdentityFile ~/.ssh/id_ed25519
+```
+
+Check it with `make ping ENV=production`. A **fresh** VPS has no `users.yml` account yet —
+`common` is what creates them — so the very first run goes through the image's built-in
+account instead:
+
+```bash
+make deploy ENV=production BOOTSTRAP=1   # connects as `ubuntu`, creates every account
+make ping ENV=production                 # subsequent runs use your own account
 ```
 
 ## Environments
@@ -118,6 +140,35 @@ The AI service needs qdrant and indexes it at startup **before** it accepts any 
 the first `up` with an empty `qdrant_storage` volume takes many minutes and downloads
 reference images from the internet. Keep the volume between runs. See
 `roles/app_stack/README.md` for the details and the open points on the AI image.
+
+## Centralised logs (Loki + Alloy + Grafana)
+
+The `monitoring` role runs its own compose project in `/opt/greener-monitoring`, separate
+from `app_stack` so a monitoring change never restarts the application. Alloy collects,
+Loki stores, Grafana displays — datasource and dashboards are provisioned from files, never
+clicked in the UI.
+
+Two things are provisional until their prerequisites exist (SCRUM-129):
+
+- **Access.** No VPN yet, so Grafana publishes on `127.0.0.1:3000` and Caddy stays the only
+  host-facing service. Reach it through a tunnel:
+  ```bash
+  ssh -L 3000:127.0.0.1:3000 lboillot@<vps>   # then http://localhost:3000
+  ```
+  A public vhost exists behind `grafana_public` (`group_vars/all/vars.yml`) and is **off by
+  default** — with no VPN, its only protection would be the Grafana admin password.
+- **Sources.** No application is running yet, so a systemd timer writes synthetic JSON logs
+  to `/var/log/greener-sample/` and Alloy tails those. Setting
+  `monitoring_sample_logs_enabled: false` stops the timer and removes every trace of it.
+
+```bash
+ansible-playbook -i inventories/production/hosts.yml site.yml --tags monitoring
+ansible-playbook -i inventories/production/hosts.yml site.yml --tags logsample  # generator only
+```
+
+The bring-up ends by asking Grafana to run a real query against the Loki datasource, so a
+broken config fails the run instead of leaving a restart loop. See
+`roles/monitoring/README.md`.
 
 ## Secrets (ansible-vault)
 

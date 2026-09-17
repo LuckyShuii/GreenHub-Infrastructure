@@ -1,2 +1,36 @@
 ---
-# Handlers for the monitoring role (restarts/reloads — to be filled).
+# Configs are bind-mounted, so compose sees no change when they do: each container is
+# restarted explicitly by the task that rendered its config.
+- name: restart loki
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_dir }}"
+    files:
+      - docker-compose.yml
+    services:
+      - loki
+    state: restarted
+  when: monitoring_enabled | bool
+
+- name: restart alloy
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_dir }}"
+    files:
+      - docker-compose.yml
+    services:
+      - alloy
+    state: restarted
+  when: monitoring_enabled | bool
+
+- name: restart grafana
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_dir }}"
+    files:
+      - docker-compose.yml
+    services:
+      - grafana
+    state: restarted
+  when: monitoring_enabled | bool
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true

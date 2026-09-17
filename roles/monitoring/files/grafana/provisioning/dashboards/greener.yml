@@ -1,0 +1,15 @@
+# Managed by Ansible (monitoring role) — do not edit on the host.
+# Points Grafana at the dashboard JSON files bind-mounted from the repo.
+apiVersion: 1
+
+providers:
+  - name: greener
+    orgId: 1
+    folder: GREENER
+    type: file
+    # Dashboards are code: a UI edit must not survive a restart.
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

@@ -1,6 +1,9 @@
 ---
 # System accounts — declarative source of truth, shared across ALL environments.
 # authorized_keys = PUBLIC keys in clear (not secrets). Offboard = state: absent + PR + replay.
+# grafana: = Grafana org role (Admin | Editor | Viewer). Omit it to give NO Grafana account.
+# Grafana users cannot be provisioned from files, so the monitoring role drives its admin
+# API from this same list — see roles/monitoring/README.md.
 system_users:
   # --- Infra admins: greener group + sudo (sudo granted via the `sudo:` field only).
   # adm is what lets them read the journal, so a deploy can be followed without root. ---
@@ -8,6 +11,7 @@ system_users:
     state: present
     groups: [greener, docker, adm]
     sudo: true
+    grafana: Admin
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGBczyxpPoAW0qDE/SjnXOdTkLdmkUxffe/SrMQvrdH7 lucasboillot"
@@ -15,6 +19,7 @@ system_users:
     state: present
     groups: [greener, docker, adm]
     sudo: true
+    grafana: Admin
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJYsoPaq5EFM/VQohxg+yri4/kOA0HMZklktUQQWHCzD oriane.corral@epitech.eu"
@@ -24,6 +29,7 @@ system_users:
     state: present
     groups: [greener, docker]
     sudo: false
+    grafana: Editor
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIII0UO5fE1hSLXsK4H4PrNDUQZispAEw3bpjihvokwRN jegui@PCgaymer"
@@ -31,6 +37,7 @@ system_users:
     state: present
     groups: [greener, docker]
     sudo: false
+    grafana: Editor
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMkh9RWR7SwLLLlCE9ahGF6F9O/FGDKZOeeuZ8S6jHRY joan guillard"
@@ -38,6 +45,7 @@ system_users:
     state: present
     groups: [greener, docker]
     sudo: false
+    grafana: Editor
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMQc+oR7Xdi8ulEQ0oGW5WdSXlWY2g1XCtbm+GG+W7uv user@-PC"
@@ -45,6 +53,7 @@ system_users:
     state: present
     groups: [greener, docker]
     sudo: false
+    grafana: Editor
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDYva16npI7RupuNf4Bj3P8QNU+lgg2o7gkUCab2V5Iw emi@emi-laptop"
@@ -52,6 +61,7 @@ system_users:
     state: present
     groups: [greener, docker]
     sudo: false
+    grafana: Editor
     shell: /bin/bash
     authorized_keys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGHULR/lweERjJEkojYNHOneS6YYLuKxYj8SkC01zW9T ton@email.comarchegroscon"

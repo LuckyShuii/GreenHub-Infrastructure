@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: monitoring
   author: GREENER infra
-  description: "Host and container monitoring stack (stub)."
+  description: "Centralised logs: Loki + Alloy + Grafana, deployed with docker compose."
   license: MIT
   min_ansible_version: "2.15"
   platforms:

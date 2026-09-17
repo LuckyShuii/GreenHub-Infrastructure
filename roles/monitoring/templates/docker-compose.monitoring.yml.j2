@@ -1,0 +1,89 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+# The Grafana admin password comes from {{ monitoring_env_file }} (0600): no secret here.
+services:
+  loki:
+    image: {{ monitoring_loki_image }}
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - {{ monitoring_config_dir }}/loki.yml:/etc/loki/config.yml:ro
+      - {{ monitoring_loki_data_volume }}:/loki
+    # Never published: only Alloy (push) and Grafana (query) talk to it, both on this network.
+    expose:
+      - "{{ monitoring_loki_port }}"
+    networks:
+      - {{ monitoring_network }}
+    # No healthcheck: the image is distroless — no shell, no wget, no curl, so there is
+    # nothing in it to probe /ready with. Readiness is verified from Ansible instead, and
+    # end to end: it asks Grafana to run a real query against this datasource.
+
+  alloy:
+    image: {{ monitoring_alloy_image }}
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_started
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:{{ monitoring_alloy_port }}
+    volumes:
+      - {{ monitoring_config_dir }}/config.alloy:/etc/alloy/config.alloy:ro
+{% if monitoring_sample_logs_enabled %}
+      # Read-only view of the synthetic logs. Replaced by the docker socket + journal when
+      # the real sources are wired (SCRUM-129). Mounted only while the generator exists:
+      # docker would otherwise silently re-create the directory this role just deleted.
+      - {{ monitoring_sample_log_dir }}:{{ monitoring_sample_log_dir }}:ro
+{% endif %}
+      # Holds the read offsets (positions), so a restart does not re-ship everything.
+      - {{ monitoring_alloy_data_volume }}:/var/lib/alloy/data
+    expose:
+      - "{{ monitoring_alloy_port }}"
+    networks:
+      - {{ monitoring_network }}
+    # No healthcheck: the image ships neither curl nor wget, and unlike qdrant it has no
+    # bash either, so there is nothing to probe /-/ready with. `docker compose ps` and the
+    # Alloy UI (port {{ monitoring_alloy_port }}, over the SSH tunnel) are the way to check it.
+
+  grafana:
+    image: {{ monitoring_grafana_image }}
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_started
+    env_file:
+      - {{ monitoring_env_file }}
+    environment:
+      # Provisioned from files below; nobody signs up, nobody phones home.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+{% if grafana_public | default(false) | bool %}
+      GF_SERVER_ROOT_URL: "{{ monitoring_grafana_root_url }}"
+{% endif %}
+    volumes:
+      - {{ monitoring_grafana_provisioning_dir }}:/etc/grafana/provisioning:ro
+      - {{ monitoring_grafana_dashboards_dir }}:/var/lib/grafana/dashboards:ro
+      - {{ monitoring_grafana_data_volume }}:/var/lib/grafana
+    # Loopback only — Caddy stays the single host-facing service. Reach it with
+    #   ssh -L {{ monitoring_grafana_port }}:{{ monitoring_grafana_publish }} <user>@<vps>
+    ports:
+      - "{{ monitoring_grafana_publish }}:{{ monitoring_grafana_port }}"
+    networks:
+      - {{ monitoring_network }}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:{{ monitoring_grafana_port }}/api/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  {{ monitoring_loki_data_volume }}:
+  {{ monitoring_alloy_data_volume }}:
+  {{ monitoring_grafana_data_volume }}:
+
+networks:
+  {{ monitoring_network }}:
+    driver: bridge

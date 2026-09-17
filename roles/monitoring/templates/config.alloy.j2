@@ -1,0 +1,67 @@
+// {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+// Alloy (Promtail's successor) is the only collector. Today it tails the synthetic log
+// files; SCRUM-129 replaces local.file_match with discovery.docker + loki.source.journal
+// and leaves the rest of this pipeline as is.
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// One target per sample file. The filename carries the service name, but we label from the
+// JSON payload instead (below) so the labels survive the switch to container logs.
+local.file_match "greener_sample" {
+  path_targets = [
+    {
+      __path__ = "{{ monitoring_sample_log_dir }}/*.log",
+      job      = "greener-sample",
+    },
+  ]
+  sync_period = "15s"
+}
+
+loki.source.file "greener_sample" {
+  targets    = local.file_match.greener_sample.targets
+  forward_to = [loki.process.greener_sample.receiver]
+}
+
+loki.process "greener_sample" {
+  forward_to = [loki.write.default.receiver]
+
+  // The generator emits JSON lines shaped like the real services will.
+  stage.json {
+    expressions = {
+      ts      = "ts",
+      level   = "level",
+      service = "service",
+    }
+  }
+
+  // Keep the label set SMALL: every combination is a separate Loki stream, and a
+  // high-cardinality label (a request id, a duration) would blow the index up.
+  stage.labels {
+    values = {
+      level   = "",
+      service = "",
+    }
+  }
+
+  // Index on the event time, not on the time Alloy happened to read the line.
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339"
+  }
+
+  stage.static_labels {
+    values = {
+      env   = "{{ env_name }}",
+      agent = "alloy",
+    }
+  }
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:{{ monitoring_loki_port }}/loki/api/v1/push"
+  }
+}

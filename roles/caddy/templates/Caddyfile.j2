@@ -54,3 +54,15 @@ deploy.{{ caddy_domain }} {
 	}
 }
 {% endif %}
+
+{% if caddy_grafana_enabled | bool %}
+# Grafana, exposed publicly ONLY when grafana_public is on. Caddy terminates TLS and
+# forwards to the loopback port the monitoring role publishes; the only authentication is
+# Grafana's own admin login, which is why this stays off until the VPN lands (SCRUM-129).
+# Needs a DNS record for grafana.{{ caddy_domain }} or ACME cannot issue its certificate.
+grafana.{{ caddy_domain }} {
+	import security_headers
+
+	reverse_proxy {{ caddy_grafana_upstream }}
+}
+{% endif %}

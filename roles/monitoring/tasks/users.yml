@@ -1,0 +1,184 @@
+---
+# Grafana accounts, one per person, driven by group_vars/all/users.yml.
+#
+# Datasources and dashboards are provisioned from files; USERS CANNOT BE — Grafana keeps
+# them in its own database and offers no file provisioning for them. So this talks to its
+# admin API instead, and keeps group_vars/all/users.yml as the single source of truth:
+#   grafana: <role>   -> account exists with that org role
+#   no grafana: field -> no account (the non-human `deploy` account, for instance)
+#   state: absent     -> account removed, same offboarding gesture as the system account
+
+- name: Select the accounts Grafana should and should not have
+  ansible.builtin.set_fact:
+    monitoring_grafana_wanted: >-
+      {{ system_users
+         | rejectattr('state', 'eq', 'absent')
+         | selectattr('grafana', 'defined')
+         | list }}
+    monitoring_grafana_unwanted: >-
+      {{ (system_users | selectattr('grafana', 'undefined') | list)
+         + (system_users | selectattr('state', 'eq', 'absent') | selectattr('grafana', 'defined') | list) }}
+
+# One password per person, so a missing entry must stop the run. Falling back to a shared
+# value would silently hand several people the same credentials.
+- name: Assert every Grafana account has its own password
+  ansible.builtin.assert:
+    that:
+      - item.name in grafana_user_passwords
+      - grafana_user_passwords[item.name] | length >= 12
+    fail_msg: >-
+      {{ item.name }} carries a grafana: role but has no usable password in
+      vault_grafana_user_passwords. Add one with
+      `make vault-edit ENV={{ env_name | default('<env>') }}` before deploying.
+    quiet: true
+  loop: "{{ monitoring_grafana_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: Assert every Grafana role is one Grafana knows
+  ansible.builtin.assert:
+    that:
+      - item.grafana in monitoring_grafana_roles
+    fail_msg: >-
+      {{ item.name }} has grafana: {{ item.grafana }}, which is not one of
+      {{ monitoring_grafana_roles | join(', ') }}.
+    quiet: true
+  loop: "{{ monitoring_grafana_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# One GET drives everything below: who exists, with which role, and with which id.
+- name: List the current Grafana org members
+  ansible.builtin.uri:
+    url: "{{ monitoring_grafana_api }}/api/org/users"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: monitoring_grafana_members
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: Index the org members by login
+  ansible.builtin.set_fact:
+    monitoring_grafana_by_login: >-
+      {{ dict(monitoring_grafana_members.json | map(attribute='login') | zip(monitoring_grafana_members.json)) }}
+
+- name: Create the missing Grafana accounts
+  ansible.builtin.uri:
+    url: "{{ monitoring_grafana_api }}/api/admin/users"
+    method: POST
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      login: "{{ item.name }}"
+      email: "{{ item.name }}@{{ monitoring_grafana_email_domain }}"
+      password: "{{ grafana_user_passwords[item.name] }}"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  loop: "{{ monitoring_grafana_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name not in monitoring_grafana_by_login
+  changed_when: true
+  no_log: "{{ hide_secrets | default(true) }}"
+
+# Always re-read, never conditionally: a freshly created account has an id the first
+# listing could not know, and Grafana puts it on the org's default role (Viewer), not the
+# one we asked for. The role PATCH below is what fixes that.
+- name: Re-list the org members
+  ansible.builtin.uri:
+    url: "{{ monitoring_grafana_api }}/api/org/users"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: monitoring_grafana_members_after
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: Re-index the org members by login
+  ansible.builtin.set_fact:
+    monitoring_grafana_by_login: >-
+      {{ dict(monitoring_grafana_members_after.json | map(attribute='login') | zip(monitoring_grafana_members_after.json)) }}
+
+# Only where the role actually differs, so a replay reports no change.
+- name: Apply each account's Grafana role
+  ansible.builtin.uri:
+    url: "{{ monitoring_grafana_api }}/api/org/users/{{ monitoring_grafana_by_login[item.name].userId }}"
+    method: PATCH
+    body_format: json
+    body:
+      role: "{{ item.grafana }}"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  loop: "{{ monitoring_grafana_wanted }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.grafana }}"
+  when:
+    - item.name in monitoring_grafana_by_login
+    - monitoring_grafana_by_login[item.name].role != item.grafana
+  changed_when: true
+  no_log: "{{ hide_secrets | default(true) }}"
+
+# The password is MANAGED STATE, not a one-off: the value in the vault is the truth, and a
+# replay restores it. Grafana never exposes the hash, so "has it drifted?" is answered the
+# only way available — by trying to authenticate as that user with the expected password.
+# That keeps the task honestly idempotent instead of resetting blindly on every run.
+- name: Check whether each account still has its configured password
+  ansible.builtin.uri:
+    url: "{{ monitoring_grafana_api }}/api/user"
+    url_username: "{{ item.name }}"
+    url_password: "{{ grafana_user_passwords[item.name] }}"
+    force_basic_auth: true
+    status_code: [200, 401]
+  register: monitoring_grafana_pw_check
+  loop: "{{ monitoring_grafana_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: Restore the configured password where it drifted
+  ansible.builtin.uri:
+    url: "{{ monitoring_grafana_api }}/api/admin/users/{{ monitoring_grafana_by_login[item.item.name].userId }}/password"
+    method: PUT
+    body_format: json
+    body:
+      password: "{{ grafana_user_passwords[item.item.name] }}"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  loop: "{{ monitoring_grafana_pw_check.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.status == 401
+    - item.item.name in monitoring_grafana_by_login
+  changed_when: true
+  no_log: "{{ hide_secrets | default(true) }}"
+
+# Offboarding, and only for logins this repo declares: an account created by hand for some
+# other reason is left alone rather than silently destroyed.
+- name: Remove the Grafana accounts that should not exist
+  ansible.builtin.uri:
+    url: "{{ monitoring_grafana_api }}/api/admin/users/{{ monitoring_grafana_by_login[item.name].userId }}"
+    method: DELETE
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  loop: "{{ monitoring_grafana_unwanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - item.name in monitoring_grafana_by_login
+    - item.name != monitoring_grafana_admin_user
+  changed_when: true
+  no_log: "{{ hide_secrets | default(true) }}"
