@@ -1,0 +1,36 @@
+{#- Rendered by the webhook role — the token comes from the vault, never edit on the host. -#}
+[
+{% for hook in webhook_deploy_hooks %}
+  {
+    "id": {{ hook.id | to_json }},
+    "execute-command": {{ webhook_deploy_script | to_json }},
+    "command-working-directory": {{ webhook_ansible_dir | to_json }},
+    "http-methods": ["POST"],
+    "response-message": "deploy accepted",
+    "include-command-output-in-response": false,
+    "trigger-rule-mismatch-http-response-code": 403,
+    "pass-arguments-to-command": [
+      {"source": "string", "name": {{ hook.service | to_json }}},
+      {"source": "payload", "name": "version"}
+    ],
+    "trigger-rule": {
+      "and": [
+        {
+          "match": {
+            "type": "value",
+            "value": {{ deploy_webhook_token | to_json }},
+            "parameter": {"source": "header", "name": "X-Deploy-Token"}
+          }
+        },
+        {
+          "match": {
+            "type": "regex",
+            "regex": {{ deploy_version_pattern | to_json }},
+            "parameter": {"source": "payload", "name": "version"}
+          }
+        }
+      ]
+    }
+  }{{ "," if not loop.last else "" }}
+{% endfor %}
+]

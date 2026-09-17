@@ -1,0 +1,10 @@
+---
+# {{ ansible_managed }}
+# The VPS deploying itself: one host, local connection, no SSH involved.
+all:
+  children:
+    greener_vps:
+      hosts:
+        {{ inventory_hostname }}:
+          ansible_connection: local
+          ansible_user: {{ webhook_user }}

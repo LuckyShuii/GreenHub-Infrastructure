@@ -36,6 +36,25 @@ greenhub.{{ caddy_domain }}, api.{{ caddy_domain }} {
 	}
 }
 
+{% if caddy_deploy_enabled %}
+# CD deploy endpoint: the CI POSTs here after publishing an image. Caddy only terminates
+# TLS and forwards — the token is checked by the webhook daemon itself, which answers 403
+# and runs nothing when it does not match.
+deploy.{{ caddy_domain }} {
+	import security_headers
+
+	handle /hooks/* {
+		reverse_proxy {{ caddy_deploy_upstream }}
+	}
+
+	# No friendly fallback here, unlike the app vhost: a deploy trigger that does not
+	# reach the daemon must fail the pipeline rather than look like a success.
+	handle {
+		respond 404
+	}
+}
+{% endif %}
+
 {% if caddy_grafana_enabled | bool %}
 # Grafana, exposed publicly ONLY when grafana_public is on. Caddy terminates TLS and
 # forwards to the loopback port the monitoring role publishes; the only authentication is

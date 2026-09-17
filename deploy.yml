@@ -1,0 +1,49 @@
+---
+# Recurring deploy, run LOCALLY ON THE VPS by the webhook daemon, as the deploy account —
+# never a push run from a workstation. Provisioning stays site.yml; this playbook only
+# rolls ONE service onto a new image tag, and it reuses the app_stack role so the compose
+# file keeps a single renderer.
+#
+#   ansible-playbook deploy.yml -e deploy_service=backend -e deploy_version=<sha>
+
+- name: Deploy one application service
+  hosts: greener_vps
+  # The deploy account has no sudo: it owns the stack directory and reaches docker through
+  # its group. This overrides the become=True that provisioning runs rely on.
+  become: false
+  gather_facts: false
+  vars:
+    app_stack_enabled: true
+    # Block until the service is running and healthy, so a broken image fails the run
+    # instead of returning green. The provisioning run leaves this off (a cold AI start
+    # indexes for a long while before it serves).
+    app_stack_wait: true
+    app_stack_services: ["{{ deploy_service }}"]
+    # Only the targeted service is pinned; an empty override makes app_stack keep the tag
+    # the other service is recorded as running, instead of resetting it to the bootstrap
+    # default.
+    app_stack_backend_version: "{{ deploy_version if deploy_service == 'backend' else '' }}"
+    app_stack_ai_version: "{{ deploy_version if deploy_service == 'ai' else '' }}"
+
+  pre_tasks:
+    # The daemon already rejects a malformed request with a 403, but the playbook must not
+    # depend on who called it.
+    - name: Validate the deploy request
+      ansible.builtin.assert:
+        that:
+          - deploy_service is defined
+          - deploy_service in app_stack_deployable_services
+          - deploy_version is defined
+          - deploy_version is match(deploy_version_pattern)
+        fail_msg: >-
+          deploy_service must be one of {{ app_stack_deployable_services | join(', ') }}
+          and deploy_version a commit SHA.
+        quiet: true
+
+  roles:
+    # Re-rendered first so an env var added to the vault reaches the containers with the
+    # same deploy, without waiting for a provisioning run.
+    - role: backend
+      tags: [backend]
+    - role: app_stack
+      tags: [app_stack]

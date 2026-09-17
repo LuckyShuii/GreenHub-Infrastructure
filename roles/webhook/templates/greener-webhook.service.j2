@@ -1,0 +1,34 @@
+# {{ ansible_managed }}
+[Unit]
+Description=GREENER CD webhook receiver
+Documentation=https://github.com/adnanh/webhook
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ webhook_user }}
+Group={{ webhook_group }}
+# Loopback only: reachable exclusively through the Caddy vhost, which terminates TLS.
+# -verbose logs every trigger and the deploy output to the journal (that is the audit
+# trail); the hook itself returns no command output to the caller.
+ExecStart=/usr/bin/webhook \
+  -hooks {{ webhook_hooks_file }} \
+  -ip {{ webhook_bind_address }} \
+  -port {{ webhook_port }} \
+  -verbose
+Restart=on-failure
+RestartSec=5s
+
+# systemd normally derives these, but the deploy account has a nologin shell and Ansible
+# needs a usable HOME for its temp files and the registry credentials.
+Environment=HOME=/home/{{ webhook_user }}
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+# ProtectHome stays OFF on purpose: the pull reads the registry credentials the docker
+# role wrote to ~{{ webhook_user }}/.docker/config.json.
+
+[Install]
+WantedBy=multi-user.target

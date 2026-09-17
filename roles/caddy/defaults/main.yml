@@ -26,6 +26,12 @@ caddy_acme_staging: true
 # The app_stack gateway's published loopback port (see app_stack_gateway_publish).
 caddy_backend_upstream: "127.0.0.1:8080"
 
+# CD deploy endpoint. The webhook daemon binds loopback only, so this vhost is the only
+# way to reach it and the only place TLS is terminated for it. Needs a DNS record for
+# deploy.<caddy_domain>, otherwise ACME cannot issue its certificate.
+caddy_deploy_enabled: true
+caddy_deploy_upstream: "127.0.0.1:9000"
+
 # Optional Grafana vhost, driven by the shared grafana_public toggle (group_vars/all).
 # Off by default: the monitoring role publishes Grafana on loopback and an SSH tunnel is
 # the intended access path until the VPN exists.

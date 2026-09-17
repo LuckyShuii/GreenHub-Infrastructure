@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+# Configuration of the LOCAL deploy runs on the VPS. Unlike the repo's ansible.cfg, this
+# one does set a default inventory: there is a single host here and it is this machine.
+[defaults]
+inventory = {{ webhook_ansible_dir }}/inventories/local/hosts.yml
+roles_path = {{ webhook_ansible_dir }}/roles
+collections_path = {{ webhook_ansible_dir }}/collections
+vault_password_file = {{ webhook_vault_pass_file }}
+
+result_format = yaml
+retry_files_enabled = False
+interpreter_python = auto_silent
+
+[privilege_escalation]
+# No escalation: the deploy account owns everything it rewrites under {{ webhook_ansible_dir | dirname }}
+# and reaches docker through its group membership. It has no sudo rights at all.
+become = False

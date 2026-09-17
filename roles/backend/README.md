@@ -10,12 +10,14 @@ from `vault_db_password`) into a plain `.env` file at deploy time.
 ## What it does
 
 - Ensures `/opt/greener` exists.
-- Renders `templates/env.j2` to `/opt/greener/.env` (`0600`, root-only until the deploy
-  account lands — SCRUM-53).
+- Renders `templates/env.j2` to `/opt/greener/.env` (`0600`, owned by the non-human `deploy`
+  account so the recurring deploy can re-render it locally without root).
 - Sets `diff: false` on the template task so secrets never land in `--check --diff` output
   or CI logs.
 
-V1 scope: only the `.env`. The docker compose deployment of the app itself comes later.
+V1 scope: only the `.env` — the stack itself is brought up by the `app_stack` role. The
+recurring deploy re-runs this role first, so an env var added to the vault reaches the
+containers with the same deploy.
 
 ## Key variables (see `defaults/main.yml`)
 

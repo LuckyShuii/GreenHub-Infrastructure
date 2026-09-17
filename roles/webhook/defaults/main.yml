@@ -1,0 +1,56 @@
+---
+# CD receiver: the adnanh/webhook daemon, which the CI calls after publishing an image.
+# It listens on LOOPBACK ONLY — Caddy stays the single host-facing service and proxies
+# deploy.<domain>/hooks/* to it, so the daemon is never directly exposed.
+
+# Debian/Ubuntu ship adnanh/webhook in universe: APT like every other install here, no
+# curl|sh. The packaged unit is stopped and disabled — we run our own, under the deploy
+# account and on loopback, so a package upgrade can never take our config over.
+webhook_packages:
+  - webhook
+webhook_packaged_service: webhook
+webhook_packaged_unit_path: /usr/lib/systemd/system/webhook.service
+
+# The deploy playbook runs on the VPS itself, so Ansible has to be installed there too.
+webhook_ansible_packages:
+  - ansible-core
+
+webhook_service: greener-webhook
+webhook_bind_address: 127.0.0.1
+webhook_port: 9000
+
+# Non-human CD account, declared in group_vars/all/users.yml (nologin, member of docker).
+webhook_user: deploy
+webhook_group: deploy
+
+webhook_config_dir: /etc/greener
+webhook_hooks_file: "{{ webhook_config_dir }}/hooks.json"
+webhook_vault_pass_file: "{{ webhook_config_dir }}/vault_pass"
+
+# Passphrase source on the CONTROL host: the same file ansible.cfg uses, so a rekey plus
+# a replay is all it takes to refresh the copy on the VPS. Never committed.
+webhook_vault_pass_src: "~/.config/greener/vault_pass"
+
+# The deploy playbook runs on the VPS in local connection, so it needs its own copy of the
+# playbook, the roles it uses and the environment's vars. Pushed by this role at
+# provisioning time — no git clone, hence no GitHub deploy key and no network dependency
+# when a deploy fires.
+webhook_ansible_dir: "/opt/greener/ansible"
+webhook_ansible_roles:
+  - app_stack
+  - backend
+
+webhook_deploy_script: /usr/local/bin/greener-deploy
+
+# backend and ai can be triggered by two pipelines at once, and two concurrent compose
+# runs on the same project corrupt each other: deployments are serialised by this lock.
+webhook_lock_file: /var/lock/greener-deploy.lock
+webhook_lock_timeout: 900
+
+# Hook id -> compose service. The ids come from the QA<->infra contract, which says
+# deploy-ia where the compose service is named ai.
+webhook_deploy_hooks:
+  - id: deploy-backend
+    service: backend
+  - id: deploy-ia
+    service: ai

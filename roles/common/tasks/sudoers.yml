@@ -2,10 +2,13 @@
 # One validated sudoers drop-in per user. Non-admins (and offboarded accounts) get
 # state=absent, so revoking sudo is just flipping `sudo: false` and replaying.
 # Policy: a sudo user is passwordless by default; set `sudo_nopassword: false` to require a password.
+# runas is explicit: without it the rule covers sudo towards root ONLY, so `sudo -u deploy`
+# falls back to asking for a password these key-only accounts do not have.
 - name: Manage per-user sudo rights
   community.general.sudoers:
     name: "greener-{{ item.name }}"
     user: "{{ item.name }}"
+    runas: "ALL:ALL"
     commands: ALL
     nopassword: "{{ item.sudo_nopassword | default(true) }}"
     state: "{{ 'present' if (item.sudo | default(false)) and ((item.state | default('present')) == 'present') else 'absent' }}"
