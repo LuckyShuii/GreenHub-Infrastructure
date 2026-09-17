@@ -81,3 +81,21 @@ monitoring_sample_max_lines: 2000
 
 # docker compose --wait budget for the bring-up (seconds).
 monitoring_wait_timeout: 300
+
+# --- Grafana accounts -------------------------------------------------------------------
+# Driven by group_vars/all/users.yml: an account's `grafana:` field is its org role
+# (Admin | Editor | Viewer); no field means no Grafana account at all. Users are the one
+# thing Grafana cannot provision from files, so the role drives its admin API instead.
+monitoring_grafana_users_enabled: true
+monitoring_grafana_api: "http://{{ monitoring_grafana_publish }}"
+monitoring_grafana_org_id: 1
+# Grafana requires an email per account and uses it as a second unique key. Nothing is ever
+# sent to it (no SMTP configured), so a synthetic domain is honest: people sign in with
+# their login, not their address.
+monitoring_grafana_email_domain: "greener.local"
+# Per-login override of the initial password. Empty = everyone starts on
+# grafana_user_initial_password. Set it in an env vault if distinct ones are ever needed.
+grafana_user_passwords: {}
+# Org roles Grafana accepts. Viewer cannot use Explore (ad-hoc log querying), which is
+# exactly what a dev needs during an incident — hence Editor for the devs, not Viewer.
+monitoring_grafana_roles: [Admin, Editor, Viewer]

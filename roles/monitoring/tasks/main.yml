@@ -195,3 +195,11 @@
   changed_when: false
   no_log: "{{ hide_secrets | default(true) }}"
   when: monitoring_enabled | bool
+
+# Accounts come last: Grafana has to be answering before its API can be driven.
+- name: Manage the Grafana accounts
+  ansible.builtin.include_tasks: users.yml
+  tags: [monitoring, grafana-users]
+  when:
+    - monitoring_enabled | bool
+    - monitoring_grafana_users_enabled | bool

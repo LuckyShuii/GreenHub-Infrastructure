@@ -70,6 +70,62 @@ provisioned at boot with `editable: false` / `allowUiUpdates: false`. A rebuilt 
 comes back identical, and a change made in the UI does not survive a restart — it belongs in
 `files/grafana/dashboards/` and in a PR.
 
+## One Grafana account per person
+
+Datasources and dashboards are provisioned from files. **Users cannot be** — Grafana keeps
+them in its own database and offers no file provisioning for them, so this role drives its
+admin API instead, from the same declarative list as the system accounts:
+
+```yaml
+# group_vars/all/users.yml
+- name: ecouy
+  state: present
+  sudo: false
+  grafana: Editor      # Admin | Editor | Viewer — omit the field for no account at all
+```
+
+| Field | Result |
+|---|---|
+| `grafana: <role>` | Account exists with that org role |
+| no `grafana:` field | No Grafana account (the non-human `deploy` account, for instance) |
+| `state: absent` | Account deleted — the same offboarding gesture as the system account |
+
+A replay reports no change: the role only POSTs accounts that are missing, only PATCHes a
+role that actually differs, and only DELETEs logins this repo declares (an account somebody
+created by hand for another reason is left alone).
+
+### Why Editor for the devs, not Viewer
+
+**Explore — the ad-hoc log querying view, which is the whole point during an incident — is
+not available to Viewers** in Grafana's default configuration. A dev who can only look at
+the prepared dashboard cannot chase down an unexpected problem. Our own dashboards stay
+locked (`allowUiUpdates: false`), so an Editor can build their own without being able to
+overwrite the provisioned ones.
+
+### Passwords
+
+Everyone starts on the shared `grafana_user_initial_password` (per env, in the vault),
+handed out manually. **It is only ever applied at account creation** — the role never resets
+it afterwards, so someone who changes theirs keeps it. Per-login overrides go in
+`grafana_user_passwords` if distinct initial passwords are ever wanted.
+
+The obvious limitation, accepted deliberately: until each person changes it, they all share
+the same password and could sign in as one another. Reaching Grafana still requires an SSH
+account on the VPS, which is its own gate. Replacing this with GitHub OAuth belongs with
+SCRUM-129, since OAuth wants the stable URL that the VPN will provide.
+
+### Two gotchas
+
+- **Org Admin is not Grafana server admin.** `grafana: Admin` grants administration *within
+  the organisation* (users, datasources). Server-level administration stays with the
+  bootstrap `admin` account, whose password is `vault_grafana_admin_password`.
+- **Accounts live in the `grafana_data` volume.** Destroying it erases them; the next replay
+  recreates them, but changed passwords and personal preferences are gone.
+
+```bash
+ansible-playbook -i inventories/production/hosts.yml site.yml --tags grafana-users
+```
+
 ## The synthetic log generator
 
 `greener-logsample.timer` runs `/usr/local/bin/greener-logsample` every minute, appending a

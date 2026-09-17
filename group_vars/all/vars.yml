@@ -5,14 +5,16 @@
 
 common_timezone: "Europe/Paris"
 
-# Image bootstrap account, not a users.yml account (exists before Ansible, unmanaged).
-# To migrate to a nominative admin account later.
-ansible_user: ubuntu
+# No ansible_user on purpose: with remote_user unset Ansible lets the SSH client pick the
+# account, so each operator connects with their own nominative users.yml account via their
+# ~/.ssh/config and sudo stays traceable per person. Fresh VPS, before `common` has created
+# the accounts, fall back to the image's unmanaged bootstrap account: make deploy BOOTSTRAP=1
 
 # Vault indirection: real values live per-env in inventories/<env>/.../vault.yml as vault_*.
 db_password: "{{ vault_db_password }}"
 grafana_admin_password: "{{ vault_grafana_admin_password }}"
 backup_restic_password: "{{ vault_backup_restic_password }}"
+grafana_user_initial_password: "{{ vault_grafana_user_initial_password }}"
 
 dockerhub_pull_user: "{{ vault_dockerhub_pull_user }}"
 dockerhub_pull_token: "{{ vault_dockerhub_pull_token }}"
@@ -22,7 +24,7 @@ dockerhub_pull_token: "{{ vault_dockerhub_pull_token }}"
 # to true ONLY with a DNS record for grafana.<caddy_domain>, and drop it entirely once the
 # VPN lands (SCRUM-129). Shared here because caddy (vhost) and monitoring (root_url) both
 # need the same answer.
-grafana_public: false
+grafana_public: true
 
 # AI service: names/values mirror the ai-service repo (.env.example + configs.py).
 # The old AI_PIPELINE_MODEL_NAME (image-classification pipeline) is gone: the service now
