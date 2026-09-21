@@ -3,10 +3,11 @@
 # in its OWN project, separate from app_stack — a monitoring change must never restart the
 # application, and an application deploy must never restart the observability stack.
 #
-# V1 scope (SCRUM-87): there is no VPN yet AND no application emitting logs yet, so
-#   * Grafana publishes on LOOPBACK only (reach it with an SSH tunnel, see README),
-#   * Alloy tails a synthetic log generator instead of real sources.
-# Binding to the VPN and wiring the real sources is the follow-up ticket (SCRUM-129).
+# SCRUM-129 wired the REAL sources: Alloy reads the application containers through the
+# Docker API and the native services (Caddy, the CD webhook) from the systemd journal. The
+# synthetic generator it replaced is off below and its teardown still runs.
+# Still provisional: Grafana publishes on LOOPBACK only and Caddy re-exposes it publicly
+# (grafana_public), because there is no VPN yet — that half of SCRUM-129 waits on SCRUM-58.
 
 monitoring_enabled: true
 
@@ -23,8 +24,9 @@ monitoring_grafana_dashboards_dir: "{{ monitoring_dir }}/grafana/dashboards"
 monitoring_owner: root
 monitoring_group: root
 
-# Isolated from greener_internal: the collector reaches log FILES on the host, not the
-# application containers, so the two networks have no reason to touch each other yet.
+# Isolated from greener_internal, and it STAYS isolated now that the real container logs
+# are collected: loki.source.docker reads them through the Docker API (the daemon hands over
+# the stream), not by connecting to the containers. Nothing here needs to reach them.
 monitoring_network: greener_monitoring
 
 # Pinned images — bump deliberately, never track a floating tag.
@@ -54,19 +56,60 @@ monitoring_grafana_admin_user: admin
 # Grafana's own default is 30 days.
 monitoring_grafana_session_lifetime: "7d"
 
-# Loki retention. 7 days is plenty while the only producer is the sample generator; revisit
-# once the real services ship (and before the disk has an opinion about it).
+# Loki retention. Kept at 7 days now that the producers are real: the host is at 77% of a
+# 77 GB disk, so this is the variable to look at first if it tightens (and the reason the
+# healthcheck noise below is dropped rather than stored).
 monitoring_loki_retention: "168h"
 
 monitoring_loki_data_volume: loki_data
 monitoring_grafana_data_volume: grafana_data
 monitoring_alloy_data_volume: alloy_data
 
-# --- Synthetic logs: temporary, SCRUM-87 only --------------------------------------------
-# Nothing real is running, so there is nothing to collect. A systemd timer fabricates lines
-# shaped like what the services will emit, purely to prove the chain end to end:
-#   file -> Alloy -> Loki -> Grafana. The follow-up ticket deletes this.
-monitoring_sample_logs_enabled: true
+# --- Real log sources (SCRUM-129) --------------------------------------------------------
+# Source 1: the containers of the application compose project, read over the Docker API.
+#
+# An ALLOW-list, and it has to be one: this host also runs containers that are nothing to do
+# with GREENER, plus the monitoring stack's own three (whose logs must not be shipped into
+# the Loki they describe). The value is the compose project name, which compose derives from
+# the directory holding the project — app_stack_dir, i.e. /opt/greener. Hardcoded rather
+# than read from app_stack: a role must not depend on another role's defaults being in
+# scope. If app_stack_dir ever moves, this follows.
+monitoring_app_compose_project: greener
+
+# How often Alloy asks the daemon which containers exist. A container started between two
+# refreshes has its first lines collected from the start anyway (the API replays them).
+monitoring_docker_refresh_interval: "15s"
+
+# Source 2: the systemd journal, for the services that run natively and have no container.
+# An allow-list again, for a different reason: on a VPS whose SSH is still public, most of
+# the journal is sshd refusing internet scans. Adding a unit here is a one-line change.
+monitoring_journal_units:
+  - caddy.service
+  - greener-webhook.service
+  - docker.service
+
+# Mirrors webhook_service (roles/webhook/defaults). Duplicated on purpose — roles/webhook
+# runs AFTER monitoring in site.yml, so its defaults are not in scope here and a
+# `webhook_service | default(...)` would silently always take the default.
+monitoring_webhook_service: greener-webhook
+
+# Bounds a cold start: without it, a first run (or a run after Alloy was down) replays the
+# whole persistent journal into Loki.
+monitoring_journal_max_age: "12h"
+
+# The backend probes itself every 10 s and uvicorn logs every probe — ~8 600 lines a day
+# that only say "the probe ran". Dropped in the pipeline, not stored and filtered out later:
+# a line nobody will ever read should cost neither index nor disk. Scoped to the loopback
+# client, so a real /health call from outside is still collected.
+monitoring_drop_healthcheck_logs: true
+
+# --- Synthetic logs: replaced by the real sources above ----------------------------------
+# OFF since SCRUM-129. The variables below are NOT dead: the role uses them to tear the
+# generator down (timer, units, script, log directory) and, through the uid lists further
+# down, to delete the alert rules that depended on it. Delete them only once that teardown
+# has been applied to every environment, or a timer survives on the host with nothing left
+# to manage it.
+monitoring_sample_logs_enabled: false
 monitoring_sample_log_dir: /var/log/greener-sample
 monitoring_sample_services: [backend, ai, postgres, caddy]
 monitoring_sample_levels: [debug, info, info, info, warn, error]
@@ -149,10 +192,12 @@ monitoring_alert_rules_folder: GREENER
 monitoring_alert_rules_interval: 1m
 
 # Error-rate rule: how many error lines within the window is abnormal, per service.
-# 10 is a starting point for real traffic, to be retuned once there IS real traffic.
-# Note it will NOT fire on the synthetic generator, which averages ~2.5 error lines per
-# service per 5 min — that is expected, not a broken rule. To exercise the rule end to end,
-# deploy once with -e monitoring_alert_error_threshold=0.
+# This now runs on REAL logs, so 10 per 5 min is a first honest guess and the number most
+# likely to need retuning — watch the dashboard's error panel for a week before trusting it.
+# What it will catch first is the gateway: nginx logs a missing favicon at [error], so a
+# crawler alone can produce a handful per minute. That is the rule working, not misfiring;
+# the fix is to stop serving 404s, not to raise the threshold reflexively.
+# To exercise the whole path on demand, deploy once with -e monitoring_alert_error_threshold=0.
 monitoring_alert_error_window: 5m
 monitoring_alert_error_threshold: 10
 monitoring_alert_error_for: 5m
@@ -172,16 +217,17 @@ monitoring_alert_error_range: 600
 # this rule would page for a service that is perfectly healthy. Caddy and the AI service
 # behave the same, Postgres is near-silent at rest.
 #
-# So it defaults to following the generator: the day SCRUM-129 switches the sample logs off,
-# these rules disappear with them and cannot reach real traffic by forgetfulness. Real
-# "is this container alive" detection is SCRUM-99 — and the information already exists on
-# the host, since app_stack already defines Docker healthchecks for backend, postgres,
-# qdrant and ai. It is simply not exposed to Grafana yet.
+# THAT DAY HAS COME (SCRUM-129), so these rules are OFF and the teardown below deletes
+# them from Grafana. They are kept in the code, not deleted, until the teardown has run in
+# every environment — a provisioned rule whose file disappears keeps evaluating forever.
+# Real "is this container alive" detection is SCRUM-99, and the information already exists
+# on the host: app_stack defines Docker healthchecks for backend, postgres, qdrant and ai.
+# It is simply not exposed to Grafana yet.
 #
-# It is also slow by nature: it must wait out the window before it can conclude anything.
+# The rule was also slow by nature: it had to wait out the window before concluding.
 monitoring_alert_silence_enabled: "{{ monitoring_sample_logs_enabled }}"
-# The services expected to be alive. Today that is what the generator fabricates; after
-# SCRUM-129 it becomes the real application services.
+# The uids to delete are the ones that were DEPLOYED, so this stays the generator's list.
+# Pointing it at the real services would orphan the four rules Grafana still holds.
 monitoring_alert_watched_services: "{{ monitoring_sample_services }}"
 monitoring_alert_silence_window: 10m
 monitoring_alert_silence_for: 10m

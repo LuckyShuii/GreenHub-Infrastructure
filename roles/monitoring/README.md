@@ -4,26 +4,28 @@
 compose project.**
 
 ```
-/var/log/greener-sample/*.log ──▶ Alloy ──push──▶ Loki ──query──▶ Grafana
-   (synthetic, temporary)                                          │
-                                                        127.0.0.1:3000 (loopback)
-                                                                   │
-                                                          ssh -L tunnel
+greener_* containers ──Docker API──┐
+  (gateway, backend, ai,           ├──▶ Alloy ──push──▶ Loki ──query──▶ Grafana
+   postgres, qdrant)               │                                     │
+systemd journal ───────────────────┘                          127.0.0.1:3000 (loopback)
+  (caddy, greener-webhook, docker)                                       │
+                                                       ssh -L tunnel  ·  grafana.<domain>
 
 Grafana Alerting ──webhook──▶ Discord #alerting   (SCRUM-130)
 ```
 
-## Scope today (SCRUM-87) vs. later (SCRUM-129)
+## What is real and what is still provisional
 
-Two things are deliberately provisional, because their prerequisites do not exist yet:
+The sources are real since [SCRUM-129](https://greener-epitech.atlassian.net/browse/SCRUM-129):
+the application containers are read through the Docker API and the services that run
+natively are read from the systemd journal. The synthetic generator that proved the chain
+end to end under SCRUM-87 is off, and its teardown removes it from the host.
 
-| | Today (SCRUM-87) | After [SCRUM-129](https://greener-epitech.atlassian.net/browse/SCRUM-129) |
+One thing stays provisional, because its prerequisite does not exist yet:
+
+| | Today | After [SCRUM-58](https://greener-epitech.atlassian.net/browse/SCRUM-58) (VPN) |
 |---|---|---|
-| Access | Grafana on `127.0.0.1:3000`, reached by SSH tunnel | Bound to the VPN IP (needs SCRUM-58) |
-| Sources | A systemd timer fabricates JSON log lines | Real container logs + the systemd journal |
-
-Everything else — the compose project, the Loki config, the Alloy pipeline, the provisioned
-datasource and dashboard — is meant to survive that ticket unchanged.
+| Access | Grafana on `127.0.0.1:3000`, plus a public vhost — an accepted risk, see below | Bound to the VPN IP, `grafana_public` deleted |
 
 ## Why Alloy and not Promtail
 
@@ -32,14 +34,138 @@ standing Promtail up would mean replacing it immediately. `loki.process` here al
 the stage names Promtail used, so nothing about the pipeline is Alloy-specific except the
 file format.
 
+## The two real sources
+
+### Containers: an allow-list on the compose project
+
+`discovery.docker` sees **every** container on the host, which is not what we want twice
+over: this VPS also runs containers unrelated to GREENER, and the monitoring stack's own
+three must not ship their logs into the Loki those logs are about — Alloy reporting a push
+failure by pushing it is a loop.
+
+So the filter is a `keep` on `com.docker.compose.project == greener`, an **allow**-list.
+A deny-list would need updating the day somebody starts one more unrelated container; this
+one is already correct then. The compose service name becomes the `service` label, so
+`backend`, `postgres`, `ai`, `qdrant` and `gateway` appear under the names they have in
+`app_stack`.
+
+### Native services: an allow-list on the unit
+
+Caddy, the CD webhook and the Docker daemon have no container to read, so they come from
+the **systemd journal** (persistent, under `/var/log/journal`). Same allow-list shape, for
+a different reason: on a VPS whose SSH is still reachable from the internet, most of the
+journal is `sshd` refusing scans. `monitoring_journal_units` is the list; adding one is a
+one-line change.
+
+`caddy.service` is relabelled to `caddy`, so a native service reads exactly like a
+containerised one and a single dashboard query covers both. `source` (`docker` /
+`journal`) is the label that tells them apart.
+
+### Alloy runs as root, and what that costs
+
+Both sources are root-owned on the host — the Docker API socket (`root:docker`) and the
+journal (`root:systemd-journal`) — so the container runs as root.
+
+Be honest about the consequence: **a process that can call the Docker API is
+root-equivalent on the host**, because it can start a privileged container. The `:ro` on
+the socket mount is close to decorative — it protects the socket *file*, not the API behind
+it. Mounting a socket read-only does not make the API read-only.
+
+What makes it acceptable today: Alloy accepts no input from the network (it publishes
+nothing, and its own UI stays inside `greener_monitoring`), it only ever *reads* logs, and
+its config is rendered by this role rather than fetched. What would actually remove the
+privilege is a docker-socket proxy exposing only `GET /containers/*/logs` to Alloy —
+worth a ticket, not worth blocking the real logs on.
+
+### Levels are matched, not parsed
+
+Five services, five formats, and not one of them is JSON:
+
+| Service | Shape | Example |
+|---|---|---|
+| `backend` | uvicorn | `INFO:     127.0.0.1:52394 - "GET /health HTTP/1.1" 200 OK` |
+| `ai` | python `logging` | `2026-09-21 12:50:24,585 [INFO] src.indexer: ...` |
+| `postgres` | pid + level | `2026-09-21 12:50:01.885 UTC [1] LOG:  ...` |
+| `qdrant` | rust tracing | `2026-09-21T12:50:24.567187Z  INFO actix_web...: ...` |
+| `gateway` | nginx, **two** formats in one stream | combined access log, and `2026/09/21 12:51:23 [error] ...` |
+| `caddy` | JSON | `{"level":"info","ts":...,"msg":"..."}` |
+| `greener-webhook` | Ansible output | `fatal: [greener-prod]: FAILED! => ...` |
+
+So the level is assigned by **matching the line**, per service, rather than by extracting a
+field and normalising it. Two reasons:
+
+- There is no single field to extract. A per-service regex would have to be written anyway,
+  and when one of those formats drifts, a regex that no longer matches yields *no* level —
+  and a stream with no `level` label is invisible to every dashboard and rule that filters
+  on one. A match that no longer matches just stops upgrading the level.
+- The vocabularies differ and have to be mapped regardless: `WARNING` and `WARN` and
+  `[warn]` are the same thing; Postgres `LOG`, `NOTICE`, `DETAIL` and `HINT` are *not*
+  levels in that sense and stay `info`.
+
+Everything starts at `info`, and the stages run in **ascending severity**, so a later match
+overrides an earlier one and a line ends up labelled with the worst thing it says about
+itself. The nginx access log has no level of its own, so its **status code** becomes one: a
+5xx is an error whatever nginx logged it as, a 4xx is a warning.
+
+Every pattern is anchored to where the level actually appears, which is the difference
+between a useful label and a coin flip — `GET /api/debug` must not become a `debug` line,
+and `?code=500` in a query string must not become an error.
+
+### Two escaping traps, and why a local run is the only proof
+
+A `stage.match` selector is a LogQL query inside an Alloy string, so there are two escaping
+layers. Both bite:
+
+- Alloy strings follow **Go's** escape rules, where `\.` is not a valid escape — an
+  unescaped regex has to live in a **raw string** (backticks).
+- The LogQL parser *inside* the match stage **rejects backtick strings of its own**, so the
+  line filter must be double-quoted with LogQL-level escaping.
+
+Raw string outside, double quotes inside, one level of `\\`. And `alloy fmt` **accepts the
+wrong version happily** — it validates Alloy syntax, not the LogQL nested in a string. The
+only thing that proves a change here is running it:
+
+```bash
+# render the template, then hand the real pipeline a file of real log lines
+docker run --rm -v "$PWD/cfg:/cfg:ro" grafana/alloy:v1.19.2 fmt /cfg/config.alloy
+docker run --rm -v "$PWD/test:/cfg:ro" -v "$PWD/logs:/logs:ro" \
+  grafana/alloy:v1.19.2 run /cfg/config.alloy --storage.path=/tmp/alloy
+```
+
+Swap the two real sources for `loki.source.file` targets carrying a `service` label, send
+the pipeline to `loki.echo` instead of `loki.write`, and every entry is printed with the
+labels it came out with. `logging { level = "info" }` is required — `loki.echo` writes
+through the logger, and at `warn` it prints nothing and looks like silence.
+
+### Timestamps come from Docker and the journal, not from the line
+
+There is **no `stage.timestamp`** anywhere, deliberately. One synthetic format was safe to
+parse; five real ones are not, and the AI service's carries no timezone at all. A
+mis-parsed timestamp does not fail loudly — it files logs at the wrong time, or trips
+Loki's `reject_old_samples` and drops them silently. Docker and the journal both stamp
+every line themselves, within milliseconds of the event, and that stamp cannot be
+malformed. The application's own timestamp stays in the line, queryable.
+
+### The healthcheck noise is dropped, not stored
+
+The backend probes itself every 10 s and uvicorn logs every probe: ~8 600 lines a day that
+only say "the probe ran". Those are dropped in the pipeline (`stage.drop`), not filtered
+out at query time — a line nobody will ever read should cost neither index nor disk. The
+pattern is anchored on the loopback client, so a real `/health` call from outside is still
+collected. `monitoring_drop_healthcheck_logs: false` keeps them.
+
 ## Separate compose project
 
 This stack lives in `/opt/greener-monitoring`, **not** `/opt/greener`. Two compose projects
 in one directory would fight over `docker-compose.yml`, and more importantly a monitoring
-change must never restart the application (nor the reverse). The network
-(`greener_monitoring`) is separate too: the collector reads log *files* on the host, not the
-application containers, so the two have no reason to touch yet. SCRUM-129 attaches Alloy to
-`greener_internal` when it switches to Docker discovery.
+change must never restart the application (nor the reverse).
+
+The network (`greener_monitoring`) is separate too, and it **stays** separate now that the
+real container logs are collected — which was not the original plan. Collecting them looks
+like it should need Alloy on `greener_internal`, but it does not: `loki.source.docker` asks
+the **daemon** for a container's log stream over the socket. Nothing is fetched from the
+containers themselves, so the collector needs no route to them, and the two projects still
+share no network.
 
 ## Reaching Grafana
 
@@ -208,66 +334,49 @@ delete the UI rule.
 Everything queries Loki, because Loki is the only datasource that exists yet. Real
 container-state rules need metrics ([SCRUM-99](https://greener-epitech.atlassian.net/browse/SCRUM-99)).
 
-| Rule | Fires when | `noDataState` |
-|---|---|---|
-| `greener-error-rate` | more than `monitoring_alert_error_threshold` error lines per service in the window | `OK` |
-| `greener-silent-<service>` | a watched service stops logging | `Alerting` |
+| Rule | Fires when | `noDataState` | State |
+|---|---|---|---|
+| `greener-error-rate` | more than `monitoring_alert_error_threshold` error lines per service in the window | `OK` | active |
+| `greener-silent-<service>` | a watched service stops logging | `Alerting` | **deleted by SCRUM-129** |
 
-### Testing them while only fake logs exist
+### Tuning the error rate on real traffic
 
-`greener-error-rate` **will not fire** on the synthetic generator: it averages ~2.5 error
-lines per service per 5 min, well under the default threshold of 10. That is expected. To
-watch the whole path fire, deploy once with `-e monitoring_alert_error_threshold=0`.
+The threshold (10 errors per 5 min per service) was a guess made while the only producer
+was a generator. It now runs on real logs, so it is the number most likely to need
+retuning — watch the dashboard's error panel for a week before trusting it.
 
-The silence rules are the better end-to-end test, because you control both directions:
+What it catches first is the **gateway**: nginx logs a missing `favicon.ico` at `[error]`,
+so a crawler alone can produce a handful per minute. That is the rule working, not
+misfiring, and the fix is to stop serving those 404s — not to raise the threshold
+reflexively.
 
-```bash
-sudo systemctl stop greener-logsample.timer    # ~10 min -> 4 FIRING alerts in Discord
-sudo systemctl start greener-logsample.timer   # -> the matching RESOLVED messages
-```
+To exercise the whole path on demand, deploy once with
+`-e monitoring_alert_error_threshold=0`.
 
-`sudo` is not optional here. Named accounts get sudo from a NOPASSWD drop-in
-(`roles/common/tasks/sudoers.yml`) and are deliberately **not** in the `sudo` group, which
-is what polkit treats as administrator. A bare `systemctl stop` therefore falls through to
-polkit, which asks for the password of an account these key-only users do not have.
+### Why the silence rules are gone
 
-### Why one silence rule per service
+They were the provisional "service is down" proxy, and they rested on an assumption that
+**died with the generator**: that silence means death. That only holds for a source which
+logs unconditionally. The generator did — 1 to 5 lines per service per minute, whatever
+happened. The real services do not: a FastAPI backend logs on request, so at 03:00 with no
+users it emits nothing, and the rule would have paged for a service in perfect health.
+Caddy and the AI service behave the same way, and Postgres is near-silent at rest.
 
-A dead service stops producing a Loki stream, so it **disappears from the query result**
-rather than reporting zero. A single rule aggregating every service would therefore never
-notice one of them dying — the series it should complain about is simply not there.
-
-One rule per expected service turns that disappearance into `NoData` on a rule that already
-names the service, and `noDataState: Alerting` raises it. The expected list is declarative:
-
-```yaml
-monitoring_alert_watched_services: [backend, ai, postgres, caddy]
-```
-
-Their labels (`service`, `env`) are **static on the rule**, not taken from the query: on
-`NoData` there is no series and therefore no query labels, so without them the Discord
-message could not say *which* service went quiet and the notification policy could not
-group on it.
-
-### The assumption it makes, and why it is tied to the generator
-
-**It treats silence as death, which only holds for a source that logs unconditionally.**
-The generator does — 1 to 5 lines per service per minute, whatever happens. The real
-services do not: a FastAPI backend logs on request, so at 03:00 with no users it emits
-nothing and this rule would page for a service that is perfectly healthy. Caddy and the AI
-service behave the same way, and Postgres is near-silent at rest.
-
-So `monitoring_alert_silence_enabled` defaults to **following the generator**:
+That is why they defaulted to following the generator:
 
 ```yaml
 monitoring_alert_silence_enabled: "{{ monitoring_sample_logs_enabled }}"
 ```
 
-The day SCRUM-129 turns the sample logs off, these rules are deleted with them (by uid, see
-below) and cannot reach real traffic through forgetfulness. A pager that cries at 03:00 for
-a healthy service is worse than no pager at all — it teaches the team to ignore the channel.
+Turning the sample logs off therefore deleted them, by uid, rather than letting them reach
+real traffic through forgetfulness. A pager that cries at 03:00 for a healthy service is
+worse than no pager at all — it teaches the team to ignore the channel.
 
-It is also slow by nature: it must wait out the window before it can conclude anything.
+Their code and uid list stay in the role until the teardown has been applied to every
+environment: a provisioned rule whose file merely disappears keeps evaluating forever (see
+*Disabling them deletes them* below). `monitoring_alert_watched_services` therefore still
+points at the generator's service list — those are the uids Grafana holds and must be told
+to delete. Pointing it at the real services would orphan the four rules that exist.
 
 ### What actually detects a dead service
 
@@ -276,6 +385,10 @@ It is also slow by nature: it must wait out the window before it can conclude an
 every moment. The gap is not missing surveillance — it is that this state, which Docker
 already computes, is not exposed to Grafana. That is SCRUM-99, and it is why that ticket
 was pulled into V1.
+
+Until it lands, this stack can tell you what a service **said** and nothing about whether
+it is alive. Worth knowing when reading a quiet dashboard: quiet is not the same as healthy
+any more.
 
 ### Disabling them deletes them
 
@@ -363,32 +476,39 @@ a user can still change it. They simply do not get to keep it.
 ansible-playbook -i inventories/production/hosts.yml site.yml --tags grafana-users
 ```
 
-## The synthetic log generator
+## The synthetic log generator is off, and its code is still here
 
-`greener-logsample.timer` runs `/usr/local/bin/greener-logsample` every minute, appending a
-few JSON lines per fake service to `/var/log/greener-sample/`. It exists purely to prove the
-chain end to end while no application runs. It trims its own files (no logrotate for a
-throwaway source) and the unit is confined with `ProtectSystem=strict`.
+`greener-logsample.timer` fabricated a few JSON lines per fake service every minute, purely
+to prove the chain end to end while nothing real was running. `monitoring_sample_logs_enabled`
+is now **false**, which does not just stop writing: the role stops and disables the timer
+and deletes the script, the units and the log directory.
 
-Setting `monitoring_sample_logs_enabled: false` does not just stop writing — it stops and
-disables the timer and deletes the script, the units and the log directory. Apply that
-state **before** deleting the code in SCRUM-129, otherwise a timer stays behind on the host
-with nothing left to manage it.
+The code is deliberately **not deleted yet**. The teardown is what removes the timer from
+the host, so it has to run in every environment first — delete the tasks now and a timer
+survives on a host with nothing left to manage it. Same for the uid lists that delete the
+alert rules which depended on it. The follow-up cleanup is a one-line flag away from being
+safe, and not before.
 
 ## Running it
 
 ```bash
 make check ENV=production                                   # dry run, whole playbook
 ansible-playbook -i inventories/production/hosts.yml site.yml --tags monitoring
-ansible-playbook -i inventories/production/hosts.yml site.yml --tags logsample  # generator only
+ansible-playbook -i inventories/production/hosts.yml site.yml --tags logsample  # teardown only
 ```
 
 On the host:
 
 ```bash
 docker compose -f /opt/greener-monitoring/docker-compose.yml ps
-systemctl list-timers greener-logsample.timer
-tail -f /var/log/greener-sample/backend.log
+
+# What Alloy decided to collect, and what it rejected — the first thing to look at when a
+# service is missing from the dashboard.
+docker logs greener-monitoring-alloy-1 --tail 50
+
+# Which streams actually exist in Loki (the answer the dashboard variables read):
+docker exec greener-monitoring-grafana-1 \
+  wget -qO- 'http://loki:3100/loki/api/v1/label/service/values'
 ```
 
 ## Bind-mounted configs need explicit restarts
@@ -403,6 +523,10 @@ rather than relying on the bring-up to notice.
   `compactor.retention_enabled`, data is merely marked expired and never deleted.
 - `schema_config.configs[].from` must stay in the past and must **never** be edited once
   data exists under it — add a new entry instead.
-- Labels are kept to `service`, `level`, `env` and `agent`. Every label combination is a
-  separate Loki stream, so a high-cardinality label (request id, duration) would blow up the
-  index. Everything else stays in the log line and is queried with `| json`.
+- Labels are kept to `service`, `level`, `env`, `source` and `agent` — about 30 streams in
+  practice. Every label combination is a separate Loki stream, so a high-cardinality label
+  (request id, status code, duration) would blow up the index. Everything else stays in the
+  log line and is queried with `| json` or `| pattern` at read time, which is exactly what
+  Loki is good at.
+- `reject_old_samples` is on, which is the other reason nothing parses timestamps out of
+  the log lines: a line stamped outside the retention window is dropped, silently.

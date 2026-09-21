@@ -1,61 +1,301 @@
 // {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
-// Alloy (Promtail's successor) is the only collector. Today it tails the synthetic log
-// files; SCRUM-129 replaces local.file_match with discovery.docker + loki.source.journal
-// and leaves the rest of this pipeline as is.
+// Two REAL sources, no synthetic files any more (SCRUM-129):
+//   * the containers of the `{{ monitoring_app_compose_project }}` compose project, read
+//     through the Docker API;
+//   * the systemd journal, for the services that run natively and have no container.
+// Both pipelines converge on the SAME label set (service, level, env, source, agent), so a
+// single dashboard query covers a containerised and a native service alike.
 
 logging {
   level  = "info"
   format = "logfmt"
 }
 
-// One target per sample file. The filename carries the service name, but we label from the
-// JSON payload instead (below) so the labels survive the switch to container logs.
-local.file_match "greener_sample" {
-  path_targets = [
-    {
-      __path__ = "{{ monitoring_sample_log_dir }}/*.log",
-      job      = "greener-sample",
-    },
-  ]
-  sync_period = "15s"
+// --- Source 1: the application containers -------------------------------------------------
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "{{ monitoring_docker_refresh_interval }}"
 }
 
-loki.source.file "greener_sample" {
-  targets    = local.file_match.greener_sample.targets
-  forward_to = [loki.process.greener_sample.receiver]
+discovery.relabel "app_containers" {
+  targets = discovery.docker.containers.targets
+
+  // An ALLOW-list on the compose project, not a deny-list. This host also runs containers
+  // that have nothing to do with GREENER, and the monitoring stack's own containers must
+  // not ship their logs into the Loki those logs are about — Alloy reporting a push error
+  // by pushing it is a loop. A keep rule stays correct the day somebody starts one more
+  // unrelated container; enumerating what to exclude would not.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "{{ monitoring_app_compose_project }}"
+    action        = "keep"
+  }
+
+  // The compose service name IS the service label: backend, ai, postgres, qdrant, gateway.
+  // The journal pipeline below produces the same shape for the native services.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
 }
 
-loki.process "greener_sample" {
+// Reads over the Docker API, NOT over the network: the daemon hands the log stream to
+// Alloy, which is why this collector still has no reason to join greener_internal.
+loki.source.docker "app" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.app_containers.output
+  forward_to       = [loki.process.app.receiver]
+  refresh_interval = "{{ monitoring_docker_refresh_interval }}"
+}
+
+// --- Source 2: the systemd journal --------------------------------------------------------
+
+discovery.relabel "journal_units" {
+  // No targets: this component exists only to hand its RULES to loki.source.journal, which
+  // applies them to the metadata of every journal entry.
+  targets = []
+
+  // Same allow-list reasoning as the containers: the journal of a public-facing VPS is
+  // mostly sshd refusing internet scans, and none of it is application logs.
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    // Backticks, not quotes: Alloy strings follow Go's escape rules, where `\.` is not a
+    // valid escape — a raw string hands the regex straight to the matcher.
+    regex         = `{{ monitoring_journal_units | map('replace', '.', '\\.') | join('|') }}`
+    action        = "keep"
+  }
+
+  // caddy.service -> caddy, so a native service reads like a compose service.
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    regex         = "(.+)\\.service"
+    target_label  = "service"
+    replacement   = "$1"
+  }
+}
+
+loki.source.journal "host" {
+  path          = "/var/log/journal"
+  // Bounds a first run (and a run after Alloy was down) to something sane instead of
+  // replaying the whole persistent journal.
+  max_age       = "{{ monitoring_journal_max_age }}"
+  relabel_rules = discovery.relabel.journal_units.rules
+  forward_to    = [loki.process.journal.receiver]
+}
+
+// --- Pipeline: containers -----------------------------------------------------------------
+//
+// NO stage.timestamp anywhere, deliberately. The synthetic generator emitted one known
+// format; five real services emit five, none of them the same, one of them (the AI service)
+// carrying no timezone at all. A mis-parsed timestamp does not fail loudly — it silently
+// files logs at the wrong time, or trips Loki's reject_old_samples and drops them. Docker
+// and the journal both stamp every line themselves, within milliseconds of the event, and
+// that stamp cannot be malformed. The application's own timestamp stays in the line.
+loki.process "app" {
   forward_to = [loki.write.default.receiver]
-
-  // The generator emits JSON lines shaped like the real services will.
-  stage.json {
-    expressions = {
-      ts      = "ts",
-      level   = "level",
-      service = "service",
-    }
-  }
-
-  // Keep the label set SMALL: every combination is a separate Loki stream, and a
-  // high-cardinality label (a request id, a duration) would blow the index up.
-  stage.labels {
-    values = {
-      level   = "",
-      service = "",
-    }
-  }
-
-  // Index on the event time, not on the time Alloy happened to read the line.
-  stage.timestamp {
-    source = "ts"
-    format = "RFC3339"
-  }
 
   stage.static_labels {
     values = {
-      env   = "{{ env_name }}",
-      agent = "alloy",
+      env    = "{{ env_name }}",
+      agent  = "alloy",
+      source = "docker",
+    }
+  }
+
+{% if monitoring_drop_healthcheck_logs | bool %}
+  // The backend probes itself every 10 s (the compose healthcheck) and uvicorn logs every
+  // single probe: ~8 600 lines a day that only say "the probe ran". Anchored on the
+  // loopback client so a real /health call from outside is still collected. Dropped first
+  // so it costs neither an index entry nor disk.
+  stage.match {
+    selector = `{service="backend"}`
+
+    stage.drop {
+      expression          = `^INFO: +127\.0\.0\.1:[0-9]+ - "GET /health HTTP/1\.1" 200`
+      drop_counter_reason = "backend_healthcheck"
+    }
+  }
+{% endif %}
+
+  // --- Levels ---------------------------------------------------------------------------
+  // Levels are assigned by matching the line, not by extracting a field, because there is
+  // no field to extract: uvicorn writes `INFO:`, the AI service `[INFO]`, Postgres `LOG:`,
+  // Qdrant a bare `INFO`, nginx `[error]` or nothing at all. Matching keeps each service's
+  // own vocabulary in one readable place and cannot half-fail the way a regex whose format
+  // drifted does — it just stops upgrading the level.
+  //
+  // Everything starts at info and the stages below run in ASCENDING severity, so a later
+  // match overrides an earlier one and a line is labelled with the worst thing it says
+  // about itself. A line always ends up with a level: a stream with no `level` label is
+  // invisible to every dashboard and rule that filters on it.
+  //
+  // Every selector is an Alloy RAW string (backticks) holding a LogQL query whose line
+  // filter is double-quoted. That is not a style choice: the LogQL parser inside the match
+  // stage rejects backtick strings of its own, and an Alloy double-quoted selector would
+  // need every backslash doubled twice over. Raw string outside, LogQL escaping inside,
+  // one level of `\\` — and `alloy fmt` accepts the wrong version too, so a change here is
+  // only proven by running it (see the README).
+  stage.static_labels {
+    values = { level = "info" }
+  }
+
+  // Python logging (backend, ai) and the Qdrant tracing format, all anchored so the word
+  // "debug" inside a URL or a message does not relabel the line.
+  stage.match {
+    selector = `{service=~"backend|ai"} |~ "^(DEBUG|TRACE):|\\[(DEBUG|TRACE)\\]"`
+
+    stage.static_labels {
+      values = { level = "debug" }
+    }
+  }
+
+  stage.match {
+    selector = `{service="qdrant"} |~ "Z +(DEBUG|TRACE) "`
+
+    stage.static_labels {
+      values = { level = "debug" }
+    }
+  }
+
+  stage.match {
+    selector = `{service=~"backend|ai"} |~ "^WARNING:|\\[WARNING\\]"`
+
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+
+  stage.match {
+    selector = `{service="qdrant"} |~ "Z +WARN "`
+
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+
+  // Postgres prefixes with the process id: `... UTC [27] WARNING:`.
+  stage.match {
+    selector = `{service="postgres"} |~ "\\] WARNING:"`
+
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+
+  // nginx writes its access log and its error_log to the same stream, so the gateway is
+  // read twice: once for the level it declares, once for the status it served. An access
+  // line has no level of its own — the status code is the only thing it says about itself,
+  // and a 5xx is an error whatever nginx logged it as.
+  stage.match {
+    selector = `{service="gateway"} |~ "\\[(warn|notice)\\]|\" 4[0-9][0-9] "`
+
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+
+  stage.match {
+    selector = `{service=~"backend|ai"} |~ "^(ERROR|CRITICAL):|\\[(ERROR|CRITICAL)\\]"`
+
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+
+  stage.match {
+    selector = `{service="qdrant"} |~ "Z +ERROR "`
+
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+
+  // ERROR, FATAL and PANIC are the three Postgres levels that mean something went wrong;
+  // LOG, NOTICE, DETAIL and HINT are not levels in that sense and stay info.
+  stage.match {
+    selector = `{service="postgres"} |~ "\\] (ERROR|FATAL|PANIC):"`
+
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+
+  stage.match {
+    selector = `{service="gateway"} |~ "\\[(error|crit|alert|emerg)\\]|\" 5[0-9][0-9] "`
+
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+}
+
+// --- Pipeline: journal --------------------------------------------------------------------
+
+loki.process "journal" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.static_labels {
+    values = {
+      env    = "{{ env_name }}",
+      agent  = "alloy",
+      source = "journal",
+      level  = "info",
+    }
+  }
+
+  // Caddy logs structured JSON, so its level is quoted verbatim in the line. Matching it as
+  // text rather than parsing the JSON keeps this pipeline uniform with the container one,
+  // and Caddy's `msg`/`logger` fields stay queryable with `| json` in Grafana.
+  stage.match {
+    selector = `{service="caddy"} |~ "\"level\":\"debug\""`
+
+    stage.static_labels {
+      values = { level = "debug" }
+    }
+  }
+
+  stage.match {
+    selector = `{service="caddy"} |~ "\"level\":\"warn\""`
+
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+
+  stage.match {
+    selector = `{service="caddy"} |~ "\"level\":\"(error|fatal|panic)\""`
+
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+
+  // The CD webhook's log IS the Ansible output of the deploy it just ran, so its levels are
+  // Ansible's own vocabulary: a `fatal:` line or a non-zero `failed=` in the recap means the
+  // deploy broke, which is exactly what should show up as an error on the dashboard.
+  stage.match {
+    selector = `{service="{{ monitoring_webhook_service }}"} |~ "^fatal:|\\bfailed=[1-9]"`
+
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+
+  // The Docker daemon's own level prefix, e.g. `level=error msg="..."`.
+  stage.match {
+    selector = `{service="docker"} |~ "level=warning"`
+
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+
+  stage.match {
+    selector = `{service="docker"} |~ "level=(error|fatal)"`
+
+    stage.static_labels {
+      values = { level = "error" }
     }
   }
 }
