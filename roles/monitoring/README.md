@@ -403,6 +403,57 @@ Discord rather than e-mail, deliberately: it gives mobile push for free, and the
 SMTP relay to operate, no API key to rotate at a provider, and no deliverability to
 babysit.
 
+### The message is an embed, and that is what makes the links clickable
+
+Grafana's default Discord message (`default.message`) prints, for every alert in the group,
+its full label set, its annotations, and two bare URLs. It is accurate and nobody reads it.
+What arrives now is three lines:
+
+```
+🔴 Conteneur ai arrêté            <- embed title, red because the group is firing
+Le conteneur ai ne tourne plus depuis 5m.
+production · ai · critical
+règle · silence · logs            <- three words, each a link
+```
+
+**`use_embed_description: true` is what makes that possible**, not the template. Grafana's
+notifier normally puts `message` in the payload's top-level `content` and leaves the embed
+with only a title — and Discord does **not** render masked links, `[word](url)`, in
+`content`. It renders them in an embed description. Without the flag the same template
+arrives as three naked URLs, which is worse than the default.
+
+**The cost is real and it is silent**: Discord only delivers `@mention` notifications from
+`content`. With the message inside the embed, an `@here` or `<@id>` in the template renders
+as plain text and pings nobody. Nothing mentions anyone today; if that ever changes, the
+mention has to move back into `content`, which means giving up the masked links.
+
+Two more things the template leans on:
+
+* The status is carried by the embed **colour** (red firing, green resolved), so the message
+  does not spell out `[FIRING]`. The emoji is there for the one distinction colour cannot
+  make: warning versus critical.
+* `summary` is ranged over per alert rather than read from `.CommonAnnotations`. An
+  annotation only lands in `CommonAnnotations` when it is byte-identical across the whole
+  group — so the day a rule templates a measured value into its summary, the common one
+  goes empty and the message would silently lose its only sentence.
+
+The `logs` link is a deep link into the `greener-logs` dashboard with the service
+pre-selected, which only works because the metric label and the log label are both called
+`service` and hold the same value. It is skipped for host rules (`service: host`), which
+have no log stream.
+
+### What an alert does NOT tell you
+
+Deliberately. The remediation for the two host rules lives here rather than in every
+message:
+
+* **Disque presque plein** — look at the Loki retention (`monitoring_loki_retention`) and
+  the Prometheus retention (`monitoring_prometheus_retention`) first, then container logs.
+  The host is a 77 GB disk sitting around 77% in normal operation, so the margin is thin by
+  design and this rule is the one most likely to be the monitoring stack's own fault.
+* **Mémoire presque saturée** — the AI service is the consumer that matters; check it on the
+  services dashboard before assuming a leak elsewhere.
+
 ### The webhook URL never lands in a readable file
 
 Grafana interpolates `$VAR` inside provisioning files. So the URL stays in

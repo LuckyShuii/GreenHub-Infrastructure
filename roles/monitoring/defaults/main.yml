@@ -229,6 +229,12 @@ monitoring_alert_webhook_env: GREENER_DISCORD_ALERT_WEBHOOK
 
 # Notification policy timings. Single VPS, one person on call: group aggressively and
 # repeat rarely — a channel that cries every minute is a channel nobody reads any more.
+# Base for the deep link the Discord message carries. Built here rather than from
+# Grafana's runtime `.ExternalURL`, which keeps its trailing slash and yields `//d/...` —
+# verified against a real notification, not assumed.
+monitoring_alert_logs_link_base: >-
+  {{ monitoring_grafana_root_url | regex_replace('/+$', '') }}
+
 monitoring_alert_group_by: [alertname, env, service]
 monitoring_alert_group_wait: 30s
 monitoring_alert_group_interval: 5m

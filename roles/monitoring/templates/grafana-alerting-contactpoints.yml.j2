@@ -16,11 +16,52 @@ contactPoints:
         disableResolveMessage: false
         settings:
           url: ${{ monitoring_alert_webhook_env }}
+
+          # THE setting that makes the rest of this file possible. Grafana's Discord
+          # notifier normally puts `message` in the payload's top-level `content` and leaves
+          # the embed with a title only. Discord does NOT render masked links —
+          # [word](url) — in `content`; it renders them in an embed description. So without
+          # this flag the links below would arrive as raw URLs, three lines of noise.
+          #
+          # THE COST, and it is a real one: Discord only delivers @mention notifications
+          # from `content`. With the message inside the embed, an `@here` or `<@id>` added
+          # to the template below would render as text and ping nobody, silently. Nothing
+          # here mentions anyone today; if that changes, the mention has to go back into
+          # `content`, which means turning this off and losing the masked links.
+          use_embed_description: true
+
           # The values below are GO templates for Grafana, not Jinja: wrapped in raw so
-          # Ansible ships them verbatim. The status prefix is what makes a firing and a
-          # resolved message tellable apart at a glance in the channel.
-          title: '{% raw %}[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{% endraw %}'
-          # default.message lists, for every alert in the group, its labels (env, service)
-          # and its annotations. Those labels come from the rules themselves (SCRUM-131) —
-          # which is why those rules must carry env and service for this to read well.
-          message: '{% raw %}{{ template "default.message" . }}{% endraw %}'
+          # Ansible ships them verbatim.
+          #
+          # The embed already carries the status as a COLOUR (red firing, green resolved)
+          # and links its title to the alert list, so spelling out "[FIRING]" would repeat
+          # what the reader can already see. The emoji separates the three cases the colour
+          # alone cannot: resolved, firing-warning, firing-critical.
+          title: >-
+            {% raw %}{{ if eq .Status "firing" }}{{ if eq .CommonLabels.severity "critical"
+            }}🔴{{ else }}🟠{{ end }}{{ else }}✅{{ end }} {{ .CommonLabels.alertname }}{% endraw %}
+
+          # Three lines, deliberately: what happened, where, what to open. This REPLACES
+          # `default.message`, which dumps every label and annotation of every alert plus
+          # two bare URLs — accurate, unreadable, and mostly a repeat of the title.
+          #
+          # `summary` is ranged over rather than read from .CommonAnnotations: an annotation
+          # only lands in CommonAnnotations when it is identical across the whole group, so
+          # the moment a rule templates a measured value into its summary the common one
+          # goes empty and the message would lose its only sentence.
+          #
+          # The notification policy groups on (alertname, env, service), so a group holds
+          # one alert in practice and .CommonLabels is safe for the context line.
+          #
+          # The raw block is interrupted once, on the logs link, to let Jinja insert the
+          # dashboard base URL. It is NOT built from Grafana's `.ExternalURL`: that value
+          # carries a trailing slash and produced `//d/greener-logs/` in a captured payload.
+          #
+          # `silence` only appears while firing — offering to silence an alert that just
+          # resolved is noise — and `logs` is skipped for the host rules, which have no
+          # log stream of their own.
+          message: |-
+            {% raw %}{{ range .Alerts }}{{ .Annotations.summary }}
+            {{ end }}`{{ .CommonLabels.env }}` · `{{ .CommonLabels.service }}` · `{{ .CommonLabels.severity }}`
+            {{ range .Alerts }}[règle]({{ .GeneratorURL }}){{ if eq .Status "firing" }} · [silence]({{ .SilenceURL }}){{ end }}{{ if ne .Labels.service "host" }} · [logs]({% endraw %}{{ monitoring_alert_logs_link_base }}{% raw %}/d/greener-logs/?var-service={{ .Labels.service }}&from=now-1h&to=now){{ end }}
+            {{ end }}{% endraw %}

@@ -188,10 +188,11 @@ groups:
           env: {{ env_name }}
           service: host
           severity: critical
+        # One sentence. This annotation IS the Discord message body (see the contact
+        # point), so what to do about it belongs in the README, not in every alert.
         annotations:
           summary: >-
-            Le disque racine dépasse {{ monitoring_alert_disk_threshold }}% d'occupation.
-            Regarder en premier la rétention Loki et Prometheus, et les logs des conteneurs.
+            Le disque racine dépasse {{ monitoring_alert_disk_threshold }} % d'occupation.
         isPaused: false
 
       # --- Memory ------------------------------------------------------------------------
@@ -243,7 +244,7 @@ groups:
           severity: warning
         annotations:
           summary: >-
-            Plus de {{ monitoring_alert_memory_threshold }}% de la RAM est occupée
+            Plus de {{ monitoring_alert_memory_threshold }} % de la RAM occupée
             (hors cache réclamable).
         isPaused: false
 {% for svc in monitoring_alert_expected_containers %}
