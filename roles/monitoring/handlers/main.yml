@@ -1,6 +1,11 @@
 ---
 # Configs are bind-mounted, so compose sees no change when they do: each container is
 # restarted explicitly by the task that rendered its config.
+#
+# All of them are skipped under --check, and must be: in a dry run the config the container
+# would re-read was never written, and the container itself may not exist yet — a service
+# this run introduces, or a fresh host where nothing is up. Without the guard, `make check`
+# fails with "no such service" on any change that adds one.
 - name: Restart loki
   community.docker.docker_compose_v2:
     project_src: "{{ monitoring_dir }}"
@@ -9,7 +14,9 @@
     services:
       - loki
     state: restarted
-  when: monitoring_enabled | bool
+  when:
+    - monitoring_enabled | bool
+    - not ansible_check_mode
 
 - name: Restart alloy
   community.docker.docker_compose_v2:
@@ -19,7 +26,21 @@
     services:
       - alloy
     state: restarted
-  when: monitoring_enabled | bool
+  when:
+    - monitoring_enabled | bool
+    - not ansible_check_mode
+
+- name: Restart prometheus
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_dir }}"
+    files:
+      - docker-compose.yml
+    services:
+      - prometheus
+    state: restarted
+  when:
+    - monitoring_enabled | bool
+    - not ansible_check_mode
 
 - name: Restart grafana
   community.docker.docker_compose_v2:
@@ -29,7 +50,9 @@
     services:
       - grafana
     state: restarted
-  when: monitoring_enabled | bool
+  when:
+    - monitoring_enabled | bool
+    - not ansible_check_mode
 
 - name: Reload systemd
   ansible.builtin.systemd:
