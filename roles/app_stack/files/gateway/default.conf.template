@@ -41,8 +41,16 @@ server {
         proxy_send_timeout 120s;
     }
 
-    location = /health {
+    # Prefix match, not exact: the backend owns the whole /health* tree (/health,
+    # /health/db). No URI part in proxy_pass -- with a variable, nginx sends that URI
+    # verbatim instead of substituting the prefix, so /health/db would silently answer
+    # the plain /health. Same "forward the URI untouched" rule as /api/ above.
+    location /health {
         set $backend_upstream ${BACKEND_UPSTREAM};
-        proxy_pass http://$backend_upstream/health;
+        proxy_pass http://$backend_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
