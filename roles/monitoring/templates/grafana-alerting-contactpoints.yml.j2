@@ -50,6 +50,11 @@ contactPoints:
           # the moment a rule templates a measured value into its summary the common one
           # goes empty and the message would lose its only sentence.
           #
+          # And it is shown only while FIRING. A summary is written in the present tense
+          # about a problem — "ne tourne plus depuis 5m" — so repeating it on the resolved
+          # message states something that has just stopped being true. The title still names
+          # what recovered, which is the part worth keeping.
+          #
           # The notification policy groups on (alertname, env, service), so a group holds
           # one alert in practice and .CommonLabels is safe for the context line.
           #
@@ -61,7 +66,8 @@ contactPoints:
           # resolved is noise — and `logs` is skipped for the host rules, which have no
           # log stream of their own.
           message: |-
-            {% raw %}{{ range .Alerts }}{{ .Annotations.summary }}
+            {% raw %}{{ if eq .Status "firing" }}{{ range .Alerts }}{{ .Annotations.summary }}
+            {{ end }}{{ else }}Retour à la normale.
             {{ end }}`{{ .CommonLabels.env }}` · `{{ .CommonLabels.service }}` · `{{ .CommonLabels.severity }}`
             {{ range .Alerts }}[règle]({{ .GeneratorURL }}){{ if eq .Status "firing" }} · [silence]({{ .SilenceURL }}){{ end }}{{ if ne .Labels.service "host" }} · [logs]({% endraw %}{{ monitoring_alert_logs_link_base }}{% raw %}/d/greener-logs/?var-service={{ .Labels.service }}&from=now-1h&to=now){{ end }}
             {{ end }}{% endraw %}
