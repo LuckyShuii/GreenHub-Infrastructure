@@ -216,6 +216,38 @@ just an empty services dashboard.
 Verified rather than assumed: without the setting,
 `container_cpu_usage_seconds_total` comes back with `id="/"` and no `name` label.
 
+### The containerd trap, which does NOT fail silently
+
+`cgroup: host` is necessary and **not sufficient**, and this one cost a production page
+before it was understood. The two failures look identical from the dashboards — one series
+for the root cgroup, nothing per container — and have nothing to do with each other.
+
+Docker on this host uses the **containerd snapshotter**: `docker info` reports the storage
+driver as `overlayfs`, not `overlay2`. In that mode cAdvisor cannot resolve a container's
+filesystem layers from `/var/lib/docker` alone; it asks containerd directly. Discovery still
+works — cAdvisor finds every `/system.slice/docker-<id>.scope` — and then **throws the
+container away** when the client cannot be built:
+
+```
+level=error msg="Failed to create existing container: /system.slice/docker-<id>.scope:
+  unable to create containerd client for overlayfs storage driver: containerd: cannot unix
+  dial containerd api service: dial unix /run/containerd/containerd.sock: connect: no such
+  file or directory" component_id=prometheus.exporter.cadvisor.containers
+```
+
+Once per container, per scrape, at `level=error` in Alloy's own log — so unlike the cgroup
+trap this one is loud, provided you read the collector's log instead of only its output.
+The fix is the socket mount; Alloy's default `containerd_host` is already this exact path
+(`monitoring_containerd_socket`), so no Alloy configuration changes.
+
+**What made it a page rather than a failed deploy** is that `absent()` cannot tell "this
+container is dead" from "cAdvisor never saw it". With no `container_last_seen` series for
+the project, every `greener-container-down-<svc>` rule fired at once on a host where all
+five containers were `Up (healthy)`. Five simultaneous container-down alerts are therefore
+worth reading as *the collector is blind*, not as five dead containers — a single dead
+container fires exactly one. The probe below now asserts the per-container series, so the
+same mistake fails the deploy instead.
+
 ### Host paths, or the metrics describe the collector
 
 `/proc` and `/sys` are separate mounts, so bind-mounting `/` alone hands Alloy an **empty**
@@ -253,15 +285,22 @@ narrow it down.
 
 A healthy datasource proves the store answers, not that anything is in it: with the
 exporters misconfigured, Prometheus stays perfectly happy and every panel is empty. So the
-role probes for two series that only exist if each exporter really ran
-(`monitoring_metrics_probes`):
+role probes for series that only exist if each exporter really ran
+(`monitoring_metrics_probes`), and a deploy that cannot produce them **fails**:
 
 | Probe | Proves |
 |---|---|
 | `node_uname_info` | the node exporter ran and read the host |
 | `up{job="integrations/cadvisor"}` | Alloy scraped the cAdvisor exporter |
+| `count(container_last_seen{project="greener"}) >= <n>` | cAdvisor actually read the containers |
 
-Both go through Grafana's datasource proxy, because Prometheus publishes no host port.
+The third one exists because the first two passed while the metrics stack was blind: `up`
+proves the exporter *answered*, never that it found anything. It counts against
+`monitoring_alert_expected_containers`, the same list the container-down rules iterate, so
+the assertion and the alerts cannot drift apart.
+
+All of them go through Grafana's datasource proxy, because Prometheus publishes no host
+port.
 
 ### Retention
 
@@ -514,10 +553,16 @@ The expected list is the real one this time:
 monitoring_alert_expected_containers: [gateway, backend, ai, postgres, qdrant]
 ```
 
+The failure mode to know about: `absent()` cannot distinguish "this container is dead" from
+"cAdvisor never saw it", so a **blind collector fires every one of these rules at once**.
+That is what happened on the first production run (see the containerd trap above). Five
+container-down alerts together mean the exporter, not the application; one dead container
+fires exactly one rule.
+
 Docker's own healthchecks (defined in `app_stack` for `backend`, `postgres`, `qdrant` and
-`ai`) are a finer signal still — a container can run while failing its probe — and exposing
-*that* to Grafana is not done: cAdvisor reports whether a container exists, not whether
-Docker considers it healthy.
+`ai`) are a finer signal still — a container can run while failing its probe. This cAdvisor
+version does export `container_health_state`, so the data is within reach, but no rule or
+panel uses it yet.
 
 ### Disabling them deletes them
 
