@@ -91,19 +91,35 @@ monitoring_host_rootfs_mount: /host/rootfs
 monitoring_host_procfs_mount: /host/proc
 monitoring_host_sysfs_mount: /sys
 
+# Docker on this host runs the containerd snapshotter: `docker info` reports the `overlayfs`
+# storage driver, not `overlay2`. cAdvisor then has to ask containerd itself for a
+# container's filesystem layers, so it needs this socket on top of the Docker one. Alloy's
+# own default for containerd_host is this very path, which is why mounting it at the same
+# place inside the container needs no Alloy config at all.
+monitoring_containerd_socket: /run/containerd/containerd.sock
+
 # Queried through Grafana's datasource proxy rather than Prometheus directly: Prometheus
 # publishes no host port (only Grafana does), so this is the one door in from the host.
 monitoring_prometheus_query_api: >-
   http://{{ monitoring_grafana_publish
   }}/api/datasources/proxy/uid/prometheus/api/v1/query
 
-# The two series that prove each exporter really ran. A healthy datasource only proves the
+# The queries that prove each exporter really ran. A healthy datasource only proves the
 # store answers; if the exporters are misconfigured Prometheus stays happy and every panel
 # is empty, which is the failure this catches. node_uname_info exists only if the node
-# exporter ran; `up` for the cAdvisor job only if Alloy scraped it.
+# exporter ran; `up` for the cAdvisor job only if Alloy scraped it. Each entry must return
+# at least one series or the deploy fails.
 monitoring_metrics_probes:
   - node_uname_info
   - 'up{job="integrations/cadvisor"}'
+  # The probe that matters, added after the first production run paged five times for
+  # containers that were all running: `up` only proves Alloy SCRAPED cAdvisor, never that
+  # cAdvisor managed to read a single container. Asserting one series per expected container
+  # is what makes a broken exporter fail the deploy instead of firing every container-down
+  # alert at once.
+  - >-
+    count(container_last_seen{project="{{ monitoring_app_compose_project }}"})
+    >= {{ monitoring_alert_expected_containers | length }}
 
 # --- Real log sources (SCRUM-129) --------------------------------------------------------
 # Source 1: the containers of the application compose project, read over the Docker API.

@@ -58,6 +58,15 @@ services:
       - /sys:{{ monitoring_host_sysfs_mount }}:ro
       # cAdvisor reads container filesystem stats from the graph driver.
       - /var/lib/docker:/var/lib/docker:ro
+      # And containerd's socket, which `cgroup: host` above does NOT make up for: the two
+      # failures look identical from the dashboards and have nothing to do with each other.
+      # Docker here uses the containerd snapshotter (storage driver `overlayfs`), so for
+      # every container it discovers cAdvisor asks containerd for the layers. Without this
+      # mount that call fails, cAdvisor drops the container it had just found — logging
+      # "unable to create containerd client for overlayfs storage driver" once per container
+      # per scrape — and exports one lonely series for the root cgroup. Every container
+      # panel is then empty and absent() declares the whole stack dead while it runs.
+      - {{ monitoring_containerd_socket }}:{{ monitoring_containerd_socket }}:ro
       # rslave, and it matters: a plain bind of / does NOT carry its submounts, so the
       # filesystem collector would report one line for / and miss every other mount.
       - type: bind
