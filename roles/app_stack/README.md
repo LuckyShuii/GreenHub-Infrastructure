@@ -101,7 +101,9 @@ broken image fails the deploy instead of returning green.
   (no gateway) therefore calls the exact same paths on `localhost:8000`.
 - `/ai/*`  → `ai:{{ ai_port }}/*` — prefix **stripped**, because the AI service (owned by
   Houssem) carries no prefix of its own and serves `/greener/...`.
-- `/health` → backend `/health` (stack liveness through the gateway)
+- `/health*` → backend `/health*` — URI forwarded untouched, like `/api`. Prefix, not exact
+  match: the tree holds both `/health` (liveness) and `/health/db` (DB reachability), and an
+  exact match would 404 the latter at the gateway, never reaching FastAPI.
 
 Anything outside those three prefixes is not routed, so the backend must keep every route
 under `/api` (Swagger included) or `/health`.
