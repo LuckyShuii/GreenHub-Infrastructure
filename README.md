@@ -106,11 +106,11 @@ itself. After publishing an image, the pipeline POSTs to the deploy endpoint:
 ```
 POST https://deploy.<domain>/hooks/deploy-backend   (or /hooks/deploy-ia)
 X-Deploy-Token: <VPS_DEPLOY_KEY>
-{"version": "<commit sha>"}
+{"version": "<commit sha>"}      # or "latest"
 ```
 
 Caddy terminates TLS and forwards to the `webhook` daemon on `127.0.0.1:9000`, which checks the
-token and the SHA — anything else is a `403` with nothing executed — then runs `deploy.yml`
+token and the version — anything else is a `403` with nothing executed — then runs `deploy.yml`
 locally, as the `deploy` account, under a `flock` so two pipelines cannot deploy at once. The CI
 never opens an SSH session to the VPS: `VPS_DEPLOY_KEY` is an **HTTP token, not an SSH key**.
 

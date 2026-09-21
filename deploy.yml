@@ -37,7 +37,7 @@
           - deploy_version is match(deploy_version_pattern)
         fail_msg: >-
           deploy_service must be one of {{ app_stack_deployable_services | join(', ') }}
-          and deploy_version a commit SHA.
+          and deploy_version a commit SHA or `latest`.
         quiet: true
 
   roles:
