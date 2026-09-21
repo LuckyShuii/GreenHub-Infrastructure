@@ -8,9 +8,9 @@ GitHub Actions ──POST /hooks/deploy-<service>──▶ Caddy (443, TLS)
                   X-Deploy-Token + {"version"}        │
                                                       ▼  127.0.0.1:9000
                                              webhook daemon (user: deploy)
-                                                      │ token + SHA match
+                                                      │ token + version match
                                                       ▼
-                                             greener-deploy <service> <sha>
+                                             greener-deploy <service> <version>
                                                       │ flock
                                                       ▼
                                              ansible-playbook deploy.yml  (connection: local)
@@ -25,7 +25,7 @@ GitHub Actions ──POST /hooks/deploy-<service>──▶ Caddy (443, TLS)
 |---|---|
 | Endpoint | `POST https://deploy.<domain>/hooks/deploy-backend` \| `/hooks/deploy-ia` |
 | Auth | header `X-Deploy-Token`, the value the pipeline holds as its `VPS_DEPLOY_KEY` repo secret |
-| Body | `{"version": "<commit sha>"}`, `Content-Type: application/json` |
+| Body | `{"version": "<commit sha>"}` or `{"version": "latest"}`, `Content-Type: application/json` |
 | Refused | `403`, and **nothing is executed** (`trigger-rule-mismatch-http-response-code`) |
 
 `VPS_DEPLOY_KEY` is an **HTTP token, not an SSH key** — the CI never opens an SSH session to

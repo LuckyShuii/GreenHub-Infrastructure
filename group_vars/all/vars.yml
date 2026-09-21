@@ -22,12 +22,18 @@ discord_alert_webhook: "{{ vault_discord_alert_webhook }}"
 dockerhub_pull_user: "{{ vault_dockerhub_pull_user }}"
 dockerhub_pull_token: "{{ vault_dockerhub_pull_token }}"
 
-# CD contract with the CI. The pipeline POSTs the commit SHA that tags the image it just
-# published, authenticated by this token (the CI knows it as the VPS_DEPLOY_KEY repo
-# secret). Both the webhook trigger rule and the deploy playbook check the SHA against the
-# pattern, so a malformed payload is refused before anything runs.
+# CD contract with the CI. The pipeline POSTs the tag of the image it just published,
+# authenticated by this token (the CI knows it as the VPS_DEPLOY_KEY repo secret). Both the
+# webhook trigger rule and the deploy playbook check the version against the pattern, so a
+# malformed payload is refused before anything runs.
+#
+# DECISION (LBT, 2026-09-21): `latest` is accepted alongside a commit SHA, so the pipeline
+# can deploy without forwarding the SHA it built. ACCEPTED COST: deployed-versions.yml then
+# records `latest` rather than a commit, so the VPS can no longer answer "what is running
+# here"; rollback has no immutable tag to return to; and a build finishing in between can
+# move the tag under a pull. Drop the alternative once the CI sends its SHA.
 deploy_webhook_token: "{{ vault_deploy_webhook_token }}"
-deploy_version_pattern: "^[0-9a-f]{7,40}$"
+deploy_version_pattern: "^([0-9a-f]{7,40}|latest)$"
 
 # Observability. The Grafana container binds the loopback only; this toggle decides whether
 # Caddy ALSO publishes it at grafana.<caddy_domain>.

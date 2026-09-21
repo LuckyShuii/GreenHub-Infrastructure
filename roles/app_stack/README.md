@@ -62,8 +62,9 @@ provisioned, but on a fresh VPS run the whole play first — this role assumes t
 ## Image tags & deploy model
 
 Registry images live in the private repo `lucasboillot/greenhub`; backend and ai share it and
-differ by a tag prefix (`backend-*` / `ai-*`). Tags are keyed by **commit SHA** (not `:latest`)
-so a build can be pinned and rolled back, and the two services are versioned **independently**.
+differ by a tag prefix (`backend-*` / `ai-*`). Tags are keyed by **commit SHA** so a build can be
+pinned and rolled back, and the two services are versioned **independently**. `latest` is also
+accepted — see the `deploy_version_pattern` note in `group_vars/all/vars.yml` for what it costs.
 
 A tag is resolved per service, in this order:
 

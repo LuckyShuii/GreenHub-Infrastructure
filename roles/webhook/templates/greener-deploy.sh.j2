@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # {{ ansible_managed }} — run by the webhook daemon as {{ webhook_user }}.
-# Arguments come from the hook definition: a constant service name, then the commit SHA
-# taken from the request payload (already matched against a SHA regex by the daemon, so a
-# malformed one is a 403 and never reaches here).
+# Arguments come from the hook definition: a constant service name, then the image tag
+# taken from the request payload (already matched against deploy_version_pattern by the
+# daemon, so a malformed one is a 403 and never reaches here).
 set -euo pipefail
 
 service="${1:?missing service}"
