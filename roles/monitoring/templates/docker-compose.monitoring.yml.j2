@@ -23,6 +23,10 @@ services:
     depends_on:
       loki:
         condition: service_started
+    # Root, and it has to be: both real sources are root-owned on the host — the Docker API
+    # socket (root:docker) and the persistent journal (root:systemd-journal). See the
+    # README for what that costs and what would remove the need.
+    user: root
     command:
       - run
       - /etc/alloy/config.alloy
@@ -30,12 +34,15 @@ services:
       - --server.http.listen-addr=0.0.0.0:{{ monitoring_alloy_port }}
     volumes:
       - {{ monitoring_config_dir }}/config.alloy:/etc/alloy/config.alloy:ro
-{% if monitoring_sample_logs_enabled %}
-      # Read-only view of the synthetic logs. Replaced by the docker socket + journal when
-      # the real sources are wired (SCRUM-129). Mounted only while the generator exists:
-      # docker would otherwise silently re-create the directory this role just deleted.
-      - {{ monitoring_sample_log_dir }}:{{ monitoring_sample_log_dir }}:ro
-{% endif %}
+      # The Docker API: how the container logs are read. Note this is NOT a network path —
+      # the daemon hands over the log stream — which is why alloy stays off greener_internal.
+      # `:ro` protects the socket FILE, not the API behind it (see the README).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # The persistent journal, for the services that run natively (Caddy, the CD webhook,
+      # the Docker daemon). machine-id is how sd-journal finds this host's journal directory;
+      # without it the journal reads as empty and nothing fails.
+      - /var/log/journal:/var/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
       # Holds the read offsets (positions), so a restart does not re-ship everything.
       - {{ monitoring_alloy_data_volume }}:/var/lib/alloy/data
     expose:

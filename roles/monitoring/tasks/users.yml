@@ -49,6 +49,10 @@
     label: "{{ item.name }}"
 
 # One GET drives everything below: who exists, with which role, and with which id.
+# check_mode: false because it must run under --check too — the uri module is skipped in
+# check mode, and the next task then indexes a register that has no .json, which failed the
+# whole dry run. Read-only, so running it changes nothing (same reason as the dpkg
+# architecture probe in roles/docker).
 - name: List the current Grafana org members
   ansible.builtin.uri:
     url: "{{ monitoring_grafana_api }}/api/org/users"
@@ -58,6 +62,7 @@
     status_code: 200
   register: monitoring_grafana_members
   changed_when: false
+  check_mode: false
   no_log: "{{ hide_secrets | default(true) }}"
 
 - name: Index the org members by login
@@ -98,6 +103,9 @@
     status_code: 200
   register: monitoring_grafana_members_after
   changed_when: false
+  # Same reason as the first listing: read-only, and the re-index below needs its .json
+  # even under --check.
+  check_mode: false
   no_log: "{{ hide_secrets | default(true) }}"
 
 - name: Re-index the org members by login
@@ -143,6 +151,9 @@
   loop_control:
     label: "{{ item.name }}"
   changed_when: false
+  # Read-only (a GET that only asks "do these credentials still work?"), and the task below
+  # reads item.status from every result — skipping it under --check failed the dry run.
+  check_mode: false
   no_log: "{{ hide_secrets | default(true) }}"
 
 - name: Restore the configured password where it drifted

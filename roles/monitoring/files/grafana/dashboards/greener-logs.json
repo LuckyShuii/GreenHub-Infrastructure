@@ -1,11 +1,11 @@
 {
   "uid": "greener-logs",
   "title": "GREENER — Logs",
-  "description": "Centralised logs. Until SCRUM-129 the only producer is the synthetic generator (job=greener-sample).",
+  "description": "Centralised logs of the real services: the application containers (gateway, backend, ai, postgres, qdrant) read through the Docker API, and the native services (caddy, greener-webhook, docker) read from the systemd journal. Provisioned from roles/monitoring/files/grafana/dashboards — a UI edit does not survive a restart.",
   "tags": ["greener", "logs"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
@@ -34,39 +34,62 @@
         "allValue": ".+",
         "multi": true,
         "current": { "text": ["All"], "value": ["$__all"] }
+      },
+      {
+        "name": "source",
+        "label": "Source",
+        "description": "docker = a container of the greener compose project, journal = a service running natively on the host.",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": { "label": "source", "refId": "source" },
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "current": { "text": ["All"], "value": ["$__all"] }
+      },
+      {
+        "name": "search",
+        "label": "Contient",
+        "description": "Case-insensitive regex applied to the log line. Leave empty for everything. A double quote in here breaks the query — escape it or use Explore.",
+        "type": "textbox",
+        "query": "",
+        "current": { "text": "", "value": "" }
       }
     ]
   },
   "panels": [
     {
-      "id": 1,
-      "type": "timeseries",
-      "title": "Log volume by service",
+      "id": 10,
+      "type": "stat",
+      "title": "Lignes (plage affichée)",
       "datasource": { "type": "loki", "uid": "loki" },
-      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "fieldConfig": {
-        "defaults": {
-          "unit": "logs",
-          "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } }
-        },
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value"
+      },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "sum by (service) (count_over_time({service=~\"$service\", level=~\"$level\"}[$__auto]))",
-          "legendFormat": "{{service}}"
+          "expr": "sum (count_over_time({service=~\"$service\", level=~\"$level\", source=~\"$source\"} |~ \"(?i)$search\" [$__auto]))",
+          "legendFormat": "lignes"
         }
       ]
     },
     {
-      "id": 2,
+      "id": 11,
       "type": "stat",
-      "title": "Errors (selected range)",
+      "title": "Erreurs",
       "datasource": { "type": "loki", "uid": "loki" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -90,17 +113,177 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "sum (count_over_time({service=~\"$service\", level=\"error\"}[$__auto]))",
-          "legendFormat": "errors"
+          "expr": "sum (count_over_time({service=~\"$service\", level=\"error\", source=~\"$source\"} |~ \"(?i)$search\" [$__auto]))",
+          "legendFormat": "erreurs"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Avertissements",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum (count_over_time({service=~\"$service\", level=\"warn\", source=~\"$source\"} |~ \"(?i)$search\" [$__auto]))",
+          "legendFormat": "avertissements"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Échecs de déploiement",
+      "description": "The CD webhook's log is the output of the Ansible run it triggered, so a `fatal:` line or a non-zero `failed=` in the recap is a deploy that broke. Zero here is the normal state.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum (count_over_time({service=\"greener-webhook\", level=\"error\"} [$__auto]))",
+          "legendFormat": "échecs"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Volume par service",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "logs",
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (service) (count_over_time({service=~\"$service\", level=~\"$level\", source=~\"$source\"} |~ \"(?i)$search\" [$__auto]))",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Volume par niveau",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "logs",
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "error" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "warn" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "info" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "debug" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (level) (count_over_time({service=~\"$service\", level=~\"$level\", source=~\"$source\"} |~ \"(?i)$search\" [$__auto]))",
+          "legendFormat": "{{level}}"
         }
       ]
     },
     {
       "id": 3,
+      "type": "timeseries",
+      "title": "Erreurs et avertissements par service",
+      "description": "The only panel worth an alert threshold: greener-error-rate fires on the same data.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars", "fillOpacity": 70, "stacking": { "mode": "none" } }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (service) (count_over_time({service=~\"$service\", level=\"error\", source=~\"$source\"} |~ \"(?i)$search\" [$__auto]))",
+          "legendFormat": "{{service}} · erreurs"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (service) (count_over_time({service=~\"$service\", level=\"warn\", source=~\"$source\"} |~ \"(?i)$search\" [$__auto]))",
+          "legendFormat": "{{service}} · avertissements"
+        }
+      ]
+    },
+    {
+      "id": 4,
       "type": "logs",
       "title": "Logs",
       "datasource": { "type": "loki", "uid": "loki" },
-      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 8 },
+      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 18 },
       "options": {
         "showTime": true,
         "showLabels": false,
@@ -115,7 +298,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{service=~\"$service\", level=~\"$level\"}"
+          "expr": "{service=~\"$service\", level=~\"$level\", source=~\"$source\"} |~ \"(?i)$search\""
         }
       ]
     }
