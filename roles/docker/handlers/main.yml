@@ -1,2 +1,7 @@
 ---
-# Handlers for the docker role (restarts/reloads — to be filled).
+# Reload, never restart: restarting dockerd stops every container on the host, application
+# included, for a change that only affects containers created afterwards anyway.
+- name: Reload docker
+  ansible.builtin.systemd:
+    name: docker
+    state: reloaded

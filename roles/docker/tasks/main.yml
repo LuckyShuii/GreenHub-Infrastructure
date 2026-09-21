@@ -59,6 +59,24 @@
     state: present
     cache_valid_time: 3600
 
+# Before the service is started, so a fresh host never runs a single container without a
+# log cap. validate: a malformed daemon.json makes dockerd refuse to START (a reload it
+# merely ignores), which on a fresh VPS means no Docker at all — so it is checked before it
+# is written, not after.
+#
+# The template carries no `ansible_managed` header, unlike every other file this repo
+# renders: dockerd rejects any key it does not know, comment-shaped or not, and refuses to
+# start. The "do not edit on the host" is in roles/docker/README.md instead.
+- name: Configure the Docker daemon
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: "{{ docker_daemon_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "python3 -c \"import json, sys; json.load(open(sys.argv[1]))\" %s"
+  notify: Reload docker
+
 - name: Ensure docker service is enabled and started
   ansible.builtin.service:
     name: docker
