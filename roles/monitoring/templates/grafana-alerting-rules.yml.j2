@@ -4,8 +4,8 @@
 # restart. Build a rule in the UI if that is easier, then export it in provisioning format
 # and commit it here — the UI is a drafting tool, this file is the truth.
 #
-# Everything here queries Loki, because Loki is the only datasource that exists yet. The
-# rules that really answer "is this container alive" need metrics (SCRUM-99).
+# Two groups: what the services SAY (Loki) and what they DO (Prometheus). The second group
+# is what finally answers "is this container alive" — SCRUM-99.
 apiVersion: 1
 
 groups:
@@ -127,6 +127,186 @@ groups:
           summary: >-
             Aucun log de {{ svc }} depuis {{ monitoring_alert_silence_window }} —
             le service est probablement arrêté.
+        isPaused: false
+{% endfor %}
+{% endif %}
+
+{% if monitoring_alert_metrics_rules_enabled | bool %}
+
+  # --- Metrics (SCRUM-99) ---------------------------------------------------------------
+  - orgId: {{ monitoring_grafana_org_id }}
+    name: greener-metrics
+    folder: {{ monitoring_alert_rules_folder }}
+    interval: {{ monitoring_alert_rules_interval }}
+    rules:
+      # --- Disk filling up -------------------------------------------------------------
+      # The tightest constraint on this host, and the one the log pipeline itself can
+      # threaten. execErrState: Alerting is doing real work here — if Prometheus cannot be
+      # queried at all the rule errors, and a monitoring stack that has stopped answering
+      # is exactly as urgent as the disk it can no longer measure.
+      - uid: greener-disk-low
+        title: Disque presque plein
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: '100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|devtmpfs|overlay|squashfs|ramfs|fuse.*"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|devtmpfs|overlay|squashfs|ramfs|fuse.*"})'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [{{ monitoring_alert_disk_threshold }}]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: OK
+        execErrState: Alerting
+        for: {{ monitoring_alert_disk_for }}
+        labels:
+          env: {{ env_name }}
+          service: host
+          severity: critical
+        annotations:
+          summary: >-
+            Le disque racine dépasse {{ monitoring_alert_disk_threshold }}% d'occupation.
+            Regarder en premier la rétention Loki et Prometheus, et les logs des conteneurs.
+        isPaused: false
+
+      # --- Memory ------------------------------------------------------------------------
+      # MemAvailable, not MemFree: the page cache is reclaimable, and counting it as used
+      # would keep this rule firing on a perfectly healthy machine.
+      - uid: greener-memory-high
+        title: Mémoire presque saturée
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: '100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [{{ monitoring_alert_memory_threshold }}]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: OK
+        execErrState: Alerting
+        for: {{ monitoring_alert_memory_for }}
+        labels:
+          env: {{ env_name }}
+          service: host
+          severity: warning
+        annotations:
+          summary: >-
+            Plus de {{ monitoring_alert_memory_threshold }}% de la RAM est occupée
+            (hors cache réclamable).
+        isPaused: false
+{% for svc in monitoring_alert_expected_containers %}
+
+      # --- {{ svc }} is not running -----------------------------------------------------
+      # THE rule the log-based silence rules pretended to be. cAdvisor emits series for a
+      # container as long as it RUNS, whatever it logs, so absence is death and not a quiet
+      # night. One rule per service for the same reason as before: a missing series cannot
+      # be grouped over.
+      #
+      # READ THE STATES BACKWARDS HERE. absent() returns 1 when the series is MISSING and
+      # nothing at all when it is present — so the healthy case is NoData, which is why
+      # noDataState is OK. It is the opposite of the log rules it replaces.
+      - uid: greener-container-down-{{ svc }}
+        title: Conteneur {{ svc }} arrêté
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: 'absent(container_last_seen{project="{{ monitoring_app_compose_project }}", service="{{ svc }}"})'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: OK
+        execErrState: Alerting
+        for: {{ monitoring_alert_container_down_for }}
+        # Static, like the log silence rules: absent() returns a series with NO labels, so
+        # without these the message could not name the service that died.
+        labels:
+          env: {{ env_name }}
+          service: {{ svc }}
+          severity: critical
+        annotations:
+          summary: >-
+            Le conteneur {{ svc }} ne tourne plus depuis
+            {{ monitoring_alert_container_down_for }}.
         isPaused: false
 {% endfor %}
 {% endif %}
