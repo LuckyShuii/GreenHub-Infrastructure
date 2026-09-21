@@ -1,15 +1,20 @@
 # `monitoring` role
 
-**Centralised logs: Loki (store) + Alloy (collector) + Grafana (UI), in their own docker
-compose project.**
+**Logs and metrics: Loki + Prometheus (stores), Alloy (the one collector), Grafana (UI),
+in their own docker compose project.**
 
 ```
+LOGS
 greener_* containers ──Docker API──┐
-  (gateway, backend, ai,           ├──▶ Alloy ──push──▶ Loki ──query──▶ Grafana
-   postgres, qdrant)               │                                     │
-systemd journal ───────────────────┘                          127.0.0.1:3000 (loopback)
-  (caddy, greener-webhook, docker)                                       │
-                                                       ssh -L tunnel  ·  grafana.<domain>
+  (gateway, backend, ai,           │
+   postgres, qdrant)               ├──▶ Alloy ──push──▶ Loki ─────┐
+systemd journal ───────────────────┘        │                     │
+  (caddy, greener-webhook, docker)          │                     ├─query─▶ Grafana
+                                            │                     │            │
+METRICS                                     │                     │   127.0.0.1:3000
+node exporter   ──┐                         │                     │     (loopback)
+cAdvisor        ──┴── inside Alloy ─────────┴─remote write─▶ Prometheus        │
+                                                                ssh -L  ·  grafana.<domain>
 
 Grafana Alerting ──webhook──▶ Discord #alerting   (SCRUM-130)
 ```
@@ -20,6 +25,11 @@ The sources are real since [SCRUM-129](https://greener-epitech.atlassian.net/bro
 the application containers are read through the Docker API and the services that run
 natively are read from the systemd journal. The synthetic generator that proved the chain
 end to end under SCRUM-87 is off, and its teardown removes it from the host.
+
+[SCRUM-99](https://greener-epitech.atlassian.net/browse/SCRUM-99) added **metrics** next to
+them, which is what finally answers the two questions logs cannot: *how much of the machine
+is left*, and *is this container alive*. Three dashboards now: `GREENER — Logs`,
+`GREENER — Machine hôte`, `GREENER — Services`.
 
 One thing stays provisional, because its prerequisite does not exist yet:
 
@@ -146,6 +156,31 @@ Loki's `reject_old_samples` and drops them silently. Docker and the journal both
 every line themselves, within milliseconds of the event, and that stamp cannot be
 malformed. The application's own timestamp stays in the line, queryable.
 
+### An idle service produces nothing, and that is not a bug
+
+`loki.source.docker` tails a container from where it is **now**; it does not replay the
+history of a container it has just discovered. Combine that with services that only log on
+demand and a freshly restarted Alloy shows a dashboard with `backend`, `gateway`, `caddy`
+and `docker` on it and **nothing** for `ai`, `postgres`, `qdrant` or `greener-webhook`.
+
+That was observed right after the SCRUM-129 deploy and it was correct: those four had not
+written a line since before Alloy started — an idle Postgres does not even checkpoint, and
+the CD webhook only speaks during a deploy.
+
+How to tell that apart from a real failure, without guessing:
+
+```bash
+# Does Alloy actually hold the container as a target? (all five app containers listed = wired)
+docker exec greener-monitoring-grafana-1 \
+  wget -qO- 'http://alloy:12345/api/v0/web/components/loki.source.docker.app'
+
+# Has the container written anything at all lately?
+docker logs greener-postgres-1 --tail 1 --timestamps
+```
+
+If the target is there and the container is silent, there is nothing to collect. This is
+also why the metrics rules, not the log rules, are what tells you a service is down.
+
 ### The healthcheck noise is dropped, not stored
 
 The backend probes itself every 10 s and uvicorn logs every probe: ~8 600 lines a day that
@@ -153,6 +188,86 @@ only say "the probe ran". Those are dropped in the pipeline (`stage.drop`), not 
 out at query time — a line nobody will ever read should cost neither index nor disk. The
 pattern is anchored on the loopback client, so a real `/health` call from outside is still
 collected. `monitoring_drop_healthcheck_logs: false` keeps them.
+
+## Metrics: the exporters live inside Alloy
+
+The ticket names *Prometheus + Node Exporter + cAdvisor*. What is deployed is Prometheus as
+a **store** and the two exporters **inside Alloy**, which is the same three things with one
+fewer container and one fewer privilege.
+
+The reasoning: node_exporter and cAdvisor need root, the host's `/proc` and `/sys`, and the
+Docker socket. Alloy already has all of it for the logs. A separate cAdvisor container would
+have to be granted `privileged: true` to obtain privileges Alloy holds anyway — so the
+separate container adds an attack surface without removing one. One agent, one set of host
+mounts, one thing to reason about.
+
+Prometheus therefore scrapes almost nothing: Alloy remote-writes the series in
+(`--web.enable-remote-write-receiver`). The one thing it does scrape is itself, so "is the
+store healthy, is it dropping samples" is answerable from the same place as everything else.
+
+### The cgroup v2 trap, which fails silently
+
+**`cgroup: host` on the Alloy container is load-bearing.** Docker gives a container a
+*private* cgroup namespace by default on cgroup v2 (this host runs kernel 6.8), and in that
+namespace the container sees only its own cgroup as `/`. cAdvisor then reports a single
+series for itself and **nothing at all for the other containers** — no error, no warning,
+just an empty services dashboard.
+
+Verified rather than assumed: without the setting,
+`container_cpu_usage_seconds_total` comes back with `id="/"` and no `name` label.
+
+### Host paths, or the metrics describe the collector
+
+`/proc` and `/sys` are separate mounts, so bind-mounting `/` alone hands Alloy an **empty**
+`/host/proc`. Each is mounted explicitly, and the root mount carries `propagation: rslave`
+— without it a bind of `/` does not carry its submounts and the filesystem collector reports
+one line for `/` while missing every other mount.
+
+`/sys` keeps its own name inside the container rather than living under `/host`, because
+cAdvisor has no path-prefix option: it always reads `/sys/fs/cgroup`.
+
+### Cardinality is the thing to get wrong here
+
+cAdvisor's `store_container_labels` exports **every** Docker label as a metric label, and
+compose sets several — including the config hash, which changes on every deploy and would
+orphan a whole set of series each time. It is off, and an allow-list keeps the two labels
+that identify a container:
+
+| From | To | Why |
+|---|---|---|
+| `container_label_com_docker_compose_service` | `service` | **The same label the logs carry.** This is what lets a dashboard put a service's CPU next to its error rate without a join. |
+| `container_label_com_docker_compose_project` | `project` | Tells the application apart from this stack, and from anything else on the host |
+
+Both long labels are then dropped. `docker_only = true` also keeps systemd's own slices out,
+which would otherwise double every number under a second set of series.
+
+### Metrics are NOT filtered to the project, and logs are
+
+A deliberate asymmetry. For **logs**, content is application-specific and noise costs index
+and disk, so only the `greener` project is collected. For **resources**, you want the whole
+machine or the numbers do not add up — a host at 90% CPU because of something outside the
+project is exactly what you need to see. The services dashboard has a `project` variable to
+narrow it down.
+
+### Telling an empty metrics stack from a broken one
+
+A healthy datasource proves the store answers, not that anything is in it: with the
+exporters misconfigured, Prometheus stays perfectly happy and every panel is empty. So the
+role probes for two series that only exist if each exporter really ran
+(`monitoring_metrics_probes`):
+
+| Probe | Proves |
+|---|---|
+| `node_uname_info` | the node exporter ran and read the host |
+| `up{job="integrations/cadvisor"}` | Alloy scraped the cAdvisor exporter |
+
+Both go through Grafana's datasource proxy, because Prometheus publishes no host port.
+
+### Retention
+
+15 days of metrics against 7 of logs. Metrics are far cheaper per unit of time and they are
+what answers "was it slow last week too". The disk is the limit — this is the second
+variable to check after the Loki retention.
 
 ## Separate compose project
 
@@ -334,10 +449,13 @@ delete the UI rule.
 Everything queries Loki, because Loki is the only datasource that exists yet. Real
 container-state rules need metrics ([SCRUM-99](https://greener-epitech.atlassian.net/browse/SCRUM-99)).
 
-| Rule | Fires when | `noDataState` | State |
-|---|---|---|---|
-| `greener-error-rate` | more than `monitoring_alert_error_threshold` error lines per service in the window | `OK` | active |
-| `greener-silent-<service>` | a watched service stops logging | `Alerting` | **deleted by SCRUM-129** |
+| Rule | Datasource | Fires when | `noDataState` | State |
+|---|---|---|---|---|
+| `greener-error-rate` | Loki | more than `monitoring_alert_error_threshold` error lines per service in the window | `OK` | active |
+| `greener-disk-low` | Prometheus | the root filesystem passes `monitoring_alert_disk_threshold`% | `OK` | active |
+| `greener-memory-high` | Prometheus | less than 10% of RAM available, cache excluded | `OK` | active |
+| `greener-container-down-<service>` | Prometheus | an expected container stops running | `OK` | active |
+| `greener-silent-<service>` | Loki | a watched service stops logging | `Alerting` | **deleted by SCRUM-129** |
 
 ### Tuning the error rate on real traffic
 
@@ -380,15 +498,26 @@ to delete. Pointing it at the real services would orphan the four rules that exi
 
 ### What actually detects a dead service
 
-`app_stack` **already defines Docker healthchecks** for `backend`, `postgres`, `qdrant` and
-`ai`. Docker probes them continuously, independently of traffic, and knows their state at
-every moment. The gap is not missing surveillance — it is that this state, which Docker
-already computes, is not exposed to Grafana. That is SCRUM-99, and it is why that ticket
-was pulled into V1.
+`greener-container-down-<service>`, since SCRUM-99 — and it works for the reason the log
+rules could not: **cAdvisor emits series for a container as long as it runs**, whatever the
+container says or does not say. Absence is death, not a quiet night.
 
-Until it lands, this stack can tell you what a service **said** and nothing about whether
-it is alive. Worth knowing when reading a quiet dashboard: quiet is not the same as healthy
-any more.
+**Read the states backwards on that rule.** `absent()` returns `1` when the series is
+*missing* and nothing at all when it is present, so the healthy case is `NoData` — which is
+why `noDataState: OK` is correct here and was the exact opposite on the rules it replaces.
+The labels are static for the same reason as before: `absent()` returns a series with no
+labels, so without them the Discord message could not name the service that died.
+
+The expected list is the real one this time:
+
+```yaml
+monitoring_alert_expected_containers: [gateway, backend, ai, postgres, qdrant]
+```
+
+Docker's own healthchecks (defined in `app_stack` for `backend`, `postgres`, `qdrant` and
+`ai`) are a finer signal still — a container can run while failing its probe — and exposing
+*that* to Grafana is not done: cAdvisor reports whether a container exists, not whether
+Docker considers it healthy.
 
 ### Disabling them deletes them
 

@@ -64,6 +64,46 @@ monitoring_loki_retention: "168h"
 monitoring_loki_data_volume: loki_data
 monitoring_grafana_data_volume: grafana_data
 monitoring_alloy_data_volume: alloy_data
+monitoring_prometheus_data_volume: prometheus_data
+
+# --- Metrics (SCRUM-99) ------------------------------------------------------------------
+# Prometheus is a STORE here, not a collector. The exporters (node + cAdvisor) run inside
+# Alloy, which already runs as root with the host's /proc, /sys and the Docker socket — a
+# separate cAdvisor container would need `privileged` to get privileges Alloy already holds.
+# Alloy remote-writes the series in; Prometheus scrapes nothing but itself.
+monitoring_prometheus_image: "prom/prometheus:v3.7.1"
+monitoring_prometheus_port: 9090
+
+# 15 s: fine enough to see a spike on a 4-vCPU host, coarse enough that the series stay
+# small. Also copied into the Grafana datasource as timeInterval — leave the two equal, or
+# Grafana proposes step values Prometheus has no points for and the graphs show gaps.
+monitoring_prometheus_scrape_interval: "15s"
+
+# 15 days of metrics against 7 of logs. Metrics are far cheaper per unit of time and are
+# what you need to answer "was this slow last week too"; the disk is the limit (77% used),
+# so this is the second variable to look at after the Loki retention.
+monitoring_prometheus_retention: "15d"
+
+# Where the HOST filesystem is mounted inside Alloy. The exporters must be pointed at these
+# or they describe the collector instead of the machine. /sys keeps its own name because
+# cAdvisor has no path-prefix option — it always reads /sys/fs/cgroup.
+monitoring_host_rootfs_mount: /host/rootfs
+monitoring_host_procfs_mount: /host/proc
+monitoring_host_sysfs_mount: /sys
+
+# Queried through Grafana's datasource proxy rather than Prometheus directly: Prometheus
+# publishes no host port (only Grafana does), so this is the one door in from the host.
+monitoring_prometheus_query_api: >-
+  http://{{ monitoring_grafana_publish
+  }}/api/datasources/proxy/uid/prometheus/api/v1/query
+
+# The two series that prove each exporter really ran. A healthy datasource only proves the
+# store answers; if the exporters are misconfigured Prometheus stays happy and every panel
+# is empty, which is the failure this catches. node_uname_info exists only if the node
+# exporter ran; `up` for the cAdvisor job only if Alloy scraped it.
+monitoring_metrics_probes:
+  - node_uname_info
+  - 'up{job="integrations/cadvisor"}'
 
 # --- Real log sources (SCRUM-129) --------------------------------------------------------
 # Source 1: the containers of the application compose project, read over the Docker API.
@@ -233,6 +273,30 @@ monitoring_alert_silence_window: 10m
 monitoring_alert_silence_for: 10m
 monitoring_alert_silence_range: 1800
 
+# --- Metric-based rules (SCRUM-99) ------------------------------------------------------
+# These are the rules the log-based ones could never be. cAdvisor emits series for a
+# container as long as it RUNS, whatever the container says or does not say, so a
+# disappearance means death rather than a quiet night.
+monitoring_alert_metrics_rules_enabled: true
+
+# The services expected to be running. Unlike the log silence rules this list is the REAL
+# one, because absence here is a fact about the container and not about its chattiness.
+monitoring_alert_expected_containers: [gateway, backend, ai, postgres, qdrant]
+monitoring_alert_container_down_for: 5m
+
+# Disk is the tightest constraint on this host (77% of 77 GB at the time of writing), and
+# the first thing a full log pipeline will threaten. 85% leaves roughly 11 GB of warning.
+monitoring_alert_disk_threshold: 85
+monitoring_alert_disk_for: 10m
+
+# MemAvailable-based, so the page cache is not counted as used. 15 GB of RAM with ~2 GB in
+# use today: crossing 90% means something is genuinely leaking.
+monitoring_alert_memory_threshold: 90
+monitoring_alert_memory_for: 10m
+
+# Query time range in seconds for the metric rules.
+monitoring_alert_metrics_range: 600
+
 # Stable uids, split wanted/unwanted like the Grafana accounts in users.yml. Removing a
 # rule from the rendered file does NOT remove it from Grafana, which keeps provisioned
 # resources in its own database — so every uid this role knows must be either declared or
@@ -240,13 +304,20 @@ monitoring_alert_silence_range: 1800
 # them evaluating and notifying forever.
 monitoring_alert_silence_uids: >-
   {{ monitoring_alert_watched_services | map('regex_replace', '^', 'greener-silent-') | list }}
+monitoring_alert_container_down_uids: >-
+  {{ monitoring_alert_expected_containers
+     | map('regex_replace', '^', 'greener-container-down-') | list }}
+monitoring_alert_metrics_uids: >-
+  {{ ['greener-disk-low', 'greener-memory-high'] + monitoring_alert_container_down_uids }}
 # Everything this role can deploy, whatever the current flags.
 monitoring_alert_all_uids: >-
-  {{ ['greener-error-rate'] + monitoring_alert_silence_uids }}
+  {{ ['greener-error-rate'] + monitoring_alert_silence_uids + monitoring_alert_metrics_uids }}
 # What rules.yml declares on this run.
 monitoring_alert_wanted_uids: >-
   {{ (['greener-error-rate']
-      + (monitoring_alert_silence_enabled | bool | ternary(monitoring_alert_silence_uids, [])))
+      + (monitoring_alert_silence_enabled | bool | ternary(monitoring_alert_silence_uids, []))
+      + (monitoring_alert_metrics_rules_enabled | bool
+         | ternary(monitoring_alert_metrics_uids, [])))
      if monitoring_alert_rules_enabled | bool else [] }}
 # What must be deleted from Grafana on this run.
 monitoring_alert_unwanted_uids: >-

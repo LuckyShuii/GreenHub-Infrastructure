@@ -1,0 +1,20 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+# Second provisioned datasource, alongside Loki. Stable uid: the host and services
+# dashboards reference it, so it must not be regenerated.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    uid: prometheus
+    url: http://prometheus:{{ monitoring_prometheus_port }}
+    # Loki stays the default: it is what Explore opens on, and chasing an incident starts
+    # in the logs. The dashboards name their datasource explicitly either way.
+    isDefault: false
+    editable: false
+    jsonData:
+      httpMethod: POST
+      # Must match the scrape interval, or Grafana proposes step values Prometheus has no
+      # data points for and graphs come back full of gaps.
+      timeInterval: "{{ monitoring_prometheus_scrape_interval }}"

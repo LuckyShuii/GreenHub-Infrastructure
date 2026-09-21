@@ -1,0 +1,19 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+# Prometheus here is a STORE, not a collector: it scrapes almost nothing. Alloy runs the
+# exporters and remote-writes the series in (--web.enable-remote-write-receiver, see the
+# compose file), for the same reason Alloy already collects the logs — one agent on the
+# host, already root, already holding the Docker socket.
+global:
+  scrape_interval: {{ monitoring_prometheus_scrape_interval }}
+  evaluation_interval: {{ monitoring_prometheus_scrape_interval }}
+  # Stamped on what Prometheus scrapes ITSELF. Series arriving by remote write carry the
+  # env label Alloy puts on them (external_labels do not apply to ingested series).
+  external_labels:
+    env: "{{ env_name }}"
+
+scrape_configs:
+  # The only scrape: Prometheus watching itself, so "is the store healthy, is it dropping
+  # samples" is answerable from the same place as everything else.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:{{ monitoring_prometheus_port }}"]
