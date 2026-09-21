@@ -5,6 +5,9 @@
 //   * the systemd journal, for the services that run natively and have no container.
 // Both pipelines converge on the SAME label set (service, level, env, source, agent), so a
 // single dashboard query covers a containerised and a native service alike.
+//
+// Since SCRUM-99 this file also produces METRICS: the node and cAdvisor exporters run
+// inside Alloy and remote-write to Prometheus. See the metrics section at the bottom.
 
 logging {
   level  = "info"
@@ -303,5 +306,82 @@ loki.process "journal" {
 loki.write "default" {
   endpoint {
     url = "http://loki:{{ monitoring_loki_port }}/loki/api/v1/push"
+  }
+}
+
+// --- Metrics (SCRUM-99) -------------------------------------------------------------------
+//
+// The exporters run INSIDE Alloy rather than as their own containers. node_exporter and
+// cAdvisor both need what this collector already has — root, the host's /proc and /sys, and
+// the Docker socket — so a separate cAdvisor container would have to be `privileged` to
+// obtain privileges Alloy holds anyway. One agent, one set of host mounts, one thing to
+// reason about. Prometheus is then only a store: it scrapes nothing but itself.
+
+prometheus.exporter.unix "host" {
+  // Host paths, not the container's own: without these the metrics describe the collector.
+  // See the compose file for the matching mounts.
+  rootfs_path = "{{ monitoring_host_rootfs_mount }}"
+  procfs_path = "{{ monitoring_host_procfs_mount }}"
+  sysfs_path  = "{{ monitoring_host_sysfs_mount }}"
+}
+
+prometheus.exporter.cadvisor "containers" {
+  docker_host = "unix:///var/run/docker.sock"
+
+  // Only Docker containers, not every cgroup on the host: systemd's own slices would
+  // otherwise double every number under a second set of series.
+  docker_only = true
+
+  // CARDINALITY. store_container_labels exports EVERY Docker label as a metric label, and
+  // compose sets several — including the config hash, which changes on every deploy and
+  // would orphan a whole set of series each time. The allow-list keeps the two that
+  // identify a container and nothing else.
+  store_container_labels       = false
+  allowlisted_container_labels = ["com.docker.compose.project", "com.docker.compose.service"]
+}
+
+prometheus.scrape "infra" {
+  targets = concat(
+    prometheus.exporter.unix.host.targets,
+    prometheus.exporter.cadvisor.containers.targets,
+  )
+  forward_to      = [prometheus.relabel.infra.receiver]
+  scrape_interval = "{{ monitoring_prometheus_scrape_interval }}"
+}
+
+prometheus.relabel "infra" {
+  forward_to = [prometheus.remote_write.default.receiver]
+
+  // Same env label the logs carry, so one dashboard variable covers both.
+  rule {
+    target_label = "env"
+    replacement  = "{{ env_name }}"
+  }
+
+  // And the same `service` label as the logs: a container's compose service name. This is
+  // what lets a dashboard put a service's CPU next to its error rate without a join.
+  rule {
+    source_labels = ["container_label_com_docker_compose_service"]
+    regex         = "(.+)"
+    target_label  = "service"
+  }
+
+  // The long label has done its job; dropping it halves the label set on every container
+  // series. `service` and `project` below carry the same information.
+  rule {
+    source_labels = ["container_label_com_docker_compose_project"]
+    regex         = "(.+)"
+    target_label  = "project"
+  }
+
+  rule {
+    regex  = "container_label_com_docker_compose_.*"
+    action = "labeldrop"
+  }
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "http://prometheus:{{ monitoring_prometheus_port }}/api/v1/write"
   }
 }

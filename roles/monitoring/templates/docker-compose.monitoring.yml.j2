@@ -23,10 +23,18 @@ services:
     depends_on:
       loki:
         condition: service_started
+      prometheus:
+        condition: service_started
     # Root, and it has to be: both real sources are root-owned on the host — the Docker API
     # socket (root:docker) and the persistent journal (root:systemd-journal). See the
     # README for what that costs and what would remove the need.
     user: root
+    # THE setting that makes container metrics work on this kernel. Docker gives a container
+    # a PRIVATE cgroup namespace by default on cgroup v2, in which the container sees only
+    # its own cgroup as `/` — cAdvisor then reports one series for itself and nothing for
+    # the other containers, silently. Verified: without this, `container_cpu_usage_seconds_total`
+    # comes back with `id="/"` alone.
+    cgroup: host
     command:
       - run
       - /etc/alloy/config.alloy
@@ -43,6 +51,21 @@ services:
       # without it the journal reads as empty and nothing fails.
       - /var/log/journal:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
+      # --- Metrics (SCRUM-99): the host as node_exporter and cAdvisor need to see it ------
+      # Without these the exporters describe the COLLECTOR, not the machine: /proc and /sys
+      # are separate mounts, so bind-mounting / alone would hand over an empty /host/proc.
+      - /proc:{{ monitoring_host_procfs_mount }}:ro
+      - /sys:{{ monitoring_host_sysfs_mount }}:ro
+      # cAdvisor reads container filesystem stats from the graph driver.
+      - /var/lib/docker:/var/lib/docker:ro
+      # rslave, and it matters: a plain bind of / does NOT carry its submounts, so the
+      # filesystem collector would report one line for / and miss every other mount.
+      - type: bind
+        source: /
+        target: {{ monitoring_host_rootfs_mount }}
+        read_only: true
+        bind:
+          propagation: rslave
       # Holds the read offsets (positions), so a restart does not re-ship everything.
       - {{ monitoring_alloy_data_volume }}:/var/lib/alloy/data
     expose:
@@ -53,11 +76,41 @@ services:
     # bash either, so there is nothing to probe /-/ready with. `docker compose ps` and the
     # Alloy UI (port {{ monitoring_alloy_port }}, over the SSH tunnel) are the way to check it.
 
+  # A STORE, not a collector: Alloy runs the exporters and remote-writes the series in, so
+  # this scrapes nothing but itself. Never published — only Grafana queries it.
+  prometheus:
+    image: {{ monitoring_prometheus_image }}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time={{ monitoring_prometheus_retention }}
+      # Without this the remote-write endpoint answers 404 and Alloy retries for ever.
+      - --web.enable-remote-write-receiver
+      - --web.listen-address=0.0.0.0:{{ monitoring_prometheus_port }}
+      # No admin API: nothing here needs to delete series over HTTP, and it is the one
+      # endpoint that can destroy the data.
+    volumes:
+      - {{ monitoring_config_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - {{ monitoring_prometheus_data_volume }}:/prometheus
+    expose:
+      - "{{ monitoring_prometheus_port }}"
+    networks:
+      - {{ monitoring_network }}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:{{ monitoring_prometheus_port }}/-/healthy | grep -qi healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   grafana:
     image: {{ monitoring_grafana_image }}
     restart: unless-stopped
     depends_on:
       loki:
+        condition: service_started
+      prometheus:
         condition: service_started
     env_file:
       - {{ monitoring_env_file }}
@@ -102,6 +155,7 @@ volumes:
   {{ monitoring_loki_data_volume }}:
   {{ monitoring_alloy_data_volume }}:
   {{ monitoring_grafana_data_volume }}:
+  {{ monitoring_prometheus_data_volume }}:
 
 networks:
   {{ monitoring_network }}:

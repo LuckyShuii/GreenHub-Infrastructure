@@ -69,13 +69,23 @@
     mode: "0644"
   notify: Restart alloy
 
-- name: Render the Grafana datasource provisioning
+- name: Render the Prometheus configuration
   ansible.builtin.template:
-    src: grafana-datasource-loki.yml.j2
-    dest: "{{ monitoring_grafana_provisioning_dir }}/datasources/loki.yml"
+    src: prometheus.yml.j2
+    dest: "{{ monitoring_config_dir }}/prometheus.yml"
     owner: "{{ monitoring_owner }}"
     group: "{{ monitoring_group }}"
     mode: "0644"
+  notify: Restart prometheus
+
+- name: Render the Grafana datasource provisioning
+  ansible.builtin.template:
+    src: "grafana-datasource-{{ item }}.yml.j2"
+    dest: "{{ monitoring_grafana_provisioning_dir }}/datasources/{{ item }}.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  loop: [loki, prometheus]
   notify: Restart grafana
 
 - name: Deploy the Grafana dashboard provider
@@ -322,6 +332,47 @@
   until: (monitoring_datasource_health.json | default({})).status | default('') == 'OK'
   retries: 12
   delay: 5
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  when: monitoring_enabled | bool
+
+# Same end-to-end proof for the metrics store: Grafana reaching Prometheus covers the
+# datasource provisioning, the network and Prometheus answering. It does NOT cover the
+# exporters having data — that is the next task.
+- name: Verify Grafana can query Prometheus
+  ansible.builtin.uri:
+    url: "http://{{ monitoring_grafana_publish }}/api/datasources/uid/prometheus/health"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: monitoring_prometheus_health
+  until: (monitoring_prometheus_health.json | default({})).status | default('') == 'OK'
+  retries: 12
+  delay: 5
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  when: monitoring_enabled | bool
+
+# A healthy datasource proves the store is reachable, not that anything is IN it: if the
+# exporters are misconfigured, Prometheus answers happily and every dashboard is empty.
+# node_uname_info is the cheapest series that only exists if the node exporter really ran,
+# and `up` for the cAdvisor job proves Alloy scraped it. A silently empty metrics stack is
+# the whole failure mode this catches.
+- name: Verify the exporters are actually producing series
+  ansible.builtin.uri:
+    url: "{{ monitoring_prometheus_query_api }}?query={{ item | urlencode }}"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: monitoring_metrics_probe
+  until: >-
+    (monitoring_metrics_probe.json | default({}, true)).get('data', {}).get('result', [])
+    | length > 0
+  retries: 12
+  delay: 10
+  loop: "{{ monitoring_metrics_probes }}"
   changed_when: false
   no_log: "{{ hide_secrets | default(true) }}"
   when: monitoring_enabled | bool
