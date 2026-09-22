@@ -148,27 +148,31 @@ from `app_stack` so a monitoring change never restarts the application. Alloy co
 Loki stores, Grafana displays — datasource and dashboards are provisioned from files, never
 clicked in the UI.
 
-Two things are provisional until their prerequisites exist (SCRUM-129):
+**Sources are real.** Alloy reads the five application containers through the Docker API
+and the native services (Caddy, the CD webhook, the Docker daemon) from the systemd
+journal. The synthetic generator that stood in while nothing was running has been torn down
+and its code deleted. Metrics come from a node and a cAdvisor exporter running inside Alloy,
+stored by a Prometheus that scrapes nothing but itself.
 
-- **Access.** No VPN yet, so Grafana publishes on `127.0.0.1:3000` and Caddy stays the only
-  host-facing service. Reach it through a tunnel:
-  ```bash
-  ssh -L 3000:127.0.0.1:3000 lboillot@<vps>   # then http://localhost:3000
-  ```
-  A public vhost exists behind `grafana_public` (`group_vars/all/vars.yml`) and is **off by
-  default** — with no VPN, its only protection would be the Grafana admin password.
-- **Sources.** No application is running yet, so a systemd timer writes synthetic JSON logs
-  to `/var/log/greener-sample/` and Alloy tails those. Setting
-  `monitoring_sample_logs_enabled: false` stops the timer and removes every trace of it.
+**Access is still provisional.** No VPN yet, so Grafana publishes on `127.0.0.1:3000` and
+Caddy stays the only host-facing service. Reach it through a tunnel:
+
+```bash
+ssh -L 3000:127.0.0.1:3000 lboillot@<vps>   # then http://localhost:3000
+```
+
+A public vhost sits behind `grafana_public` (`group_vars/all/vars.yml`) and is currently
+**on** — an accepted risk, with the compensating controls listed in
+`roles/monitoring/README.md`. Binding Grafana to the VPN address instead belongs to
+SCRUM-58.
 
 ```bash
 ansible-playbook -i inventories/production/hosts.yml site.yml --tags monitoring
-ansible-playbook -i inventories/production/hosts.yml site.yml --tags logsample  # generator only
 ```
 
-The bring-up ends by asking Grafana to run a real query against the Loki datasource, so a
-broken config fails the run instead of leaving a restart loop. See
-`roles/monitoring/README.md`.
+The bring-up ends by asking Grafana to run real queries against both datasources and by
+checking that the exporters actually produce series, so a broken config fails the run
+instead of leaving empty dashboards. See `roles/monitoring/README.md`.
 
 ## Secrets (ansible-vault)
 

@@ -7,7 +7,8 @@
 # Docker API and the native services (Caddy, the CD webhook) from the systemd journal. The
 # synthetic generator it replaced is off below and its teardown still runs.
 # Still provisional: Grafana publishes on LOOPBACK only and Caddy re-exposes it publicly
-# (grafana_public), because there is no VPN yet — that half of SCRUM-129 waits on SCRUM-58.
+# (grafana_public), because there is no VPN yet. Binding it to the VPN address belongs to
+# SCRUM-58, which has to land first — it is no longer part of SCRUM-129.
 
 monitoring_enabled: true
 
@@ -158,14 +159,6 @@ monitoring_journal_max_age: "12h"
 # a line nobody will ever read should cost neither index nor disk. Scoped to the loopback
 # client, so a real /health call from outside is still collected.
 monitoring_drop_healthcheck_logs: true
-
-# --- Synthetic logs: replaced by the real sources above ----------------------------------
-# OFF since SCRUM-129. The variables below are NOT dead: the role uses them to tear the
-# generator down (timer, units, script, log directory) and, through the uid lists further
-# down, to delete the alert rules that depended on it. Delete them only once that teardown
-# has been applied to every environment, or a timer survives on the host with nothing left
-# to manage it.
-# Lines kept per file: the generator trims itself, so a throwaway source needs no logrotate.
 
 # docker compose --wait budget for the bring-up (seconds).
 monitoring_wait_timeout: 300
