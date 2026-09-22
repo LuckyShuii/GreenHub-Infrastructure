@@ -47,3 +47,44 @@
       tags: [backend]
     - role: app_stack
       tags: [app_stack]
+
+  post_tasks:
+    # A deploy marker on every dashboard. The first question of every incident is "did this
+    # start after a deploy?", and answering it by cross-reading two tools is exactly the
+    # kind of friction that makes people not answer it at all.
+    #
+    # Posted from the playbook rather than derived from container start times, because only
+    # the playbook knows WHICH VERSION went out — that is the whole value of the marker.
+    #
+    # THREE guards, all deliberate, all saying the same thing: an annotation must never
+    # break a deployment. No token -> skipped. Grafana down or slow -> failed_when: false.
+    # changed_when: false -> a successful deploy does not report a change for a graph note.
+    - name: Annotate the deployment in Grafana
+      ansible.builtin.uri:
+        url: "{{ grafana_annotation_api }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ grafana_annotation_token }}"
+        body_format: json
+        body:
+          tags: ["deploy", "{{ deploy_service }}"]
+          text: "Déploiement {{ deploy_service }} — {{ deploy_version }}"
+        status_code: 200
+        timeout: 10
+      register: deploy_annotation
+      failed_when: false
+      changed_when: false
+      no_log: "{{ hide_secrets | default(true) }}"
+      when: grafana_annotation_token | default('') | length > 0
+
+    # Reported, not raised. Silence would hide a token that expired months ago, and the
+    # only symptom would be dashboards that quietly stopped showing deploys.
+    - name: Report a failed deploy annotation
+      ansible.builtin.debug:
+        msg: >-
+          Grafana refused the deploy annotation (HTTP
+          {{ deploy_annotation.status | default('n/a') }}). The deployment itself is
+          unaffected; check the service-account token in vault_grafana_annotation_token.
+      when:
+        - grafana_annotation_token | default('') | length > 0
+        - deploy_annotation.status | default(0) != 200
