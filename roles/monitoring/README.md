@@ -13,10 +13,14 @@ systemd journal ───────────────────┘    
                                             │                     │            │
 METRICS                                     │                     │   127.0.0.1:3000
 node exporter   ──┐                         │                     │     (loopback)
-cAdvisor        ──┴── inside Alloy ─────────┴─remote write─▶ Prometheus        │
-                                                                ssh -L  ·  grafana.<domain>
+cAdvisor          │                         │                     │
+blackbox probes ──┴── inside Alloy ─────────┴─remote write─▶ Prometheus        │
+postgres_exporter ────────scraped by Alloy──────────────────────┘   ssh -L · grafana.<domain>
 
-Grafana Alerting ──webhook──▶ Discord #alerting   (SCRUM-130)
+Grafana Alerting ─┬─ severity=critical ─▶ greener-discord-critical ─┐
+                  │                        (pings, never muted)     ├─▶ Discord #alerting
+                  └─ severity=warning  ─▶ greener-discord ──────────┘
+                                           (embed, silent 23h-08h)
 ```
 
 ## What is real and what is still provisional
@@ -28,8 +32,10 @@ end to end under SCRUM-87 is off, and its teardown removes it from the host.
 
 [SCRUM-99](https://greener-epitech.atlassian.net/browse/SCRUM-99) added **metrics** next to
 them, which is what finally answers the two questions logs cannot: *how much of the machine
-is left*, and *is this container alive*. Three dashboards now: `GREENER — Logs`,
-`GREENER — Machine hôte`, `GREENER — Services`.
+is left*, and *is this container alive*. Five dashboards now: `GREENER — Logs`,
+`GREENER — Machine hôte`, `GREENER — Services`, `GREENER — PostgreSQL` and
+`GREENER — Bordure` — the last two added with the routing work of 22/09/2026, which also
+put a deploy marker on all of them (see "Deploy annotations" below).
 
 One thing stays provisional, because its prerequisite does not exist yet:
 
@@ -382,6 +388,7 @@ neutral name in `group_vars/all/vars.yml` → rendered into `/opt/greener-monito
 | `vault_grafana_admin_password` | `grafana_admin_password` | The bootstrap `admin` account |
 | `vault_grafana_user_passwords` | `grafana_user_passwords` | One password per person (see below) |
 | `vault_discord_alert_webhook` | `discord_alert_webhook` | The alert channel webhook |
+| `vault_grafana_annotation_token` | `grafana_annotation_token` | Deploy annotations — **optional**, see below |
 
 Every non-secret Grafana setting sits in the compose file instead, so the env file holds
 nothing but credentials.
@@ -481,6 +488,69 @@ Timings are tuned for a single VPS with one person on call: group by
 about a still-firing group only every 4 h. A channel that cries every minute is a channel
 that gets muted.
 
+### One channel, two doors
+
+**DECISION (LBT, 22/09/2026): still one `#alerting` channel.** The tree below routes
+nothing anywhere else — both receivers post to the *same webhook*. What the branches decide
+is how loud a message is allowed to be.
+
+| Branch | Receiver | Pings | Muted at night |
+|---|---|---|---|
+| `severity = critical` | `greener-discord-critical` | `<@…>` | never |
+| `severity = warning` | `greener-discord` | no | 23:00–08:00 Europe/Paris |
+| no `severity` label | `greener-discord` (root) | no | no |
+
+No `continue: true` anywhere: a critical must produce one message, not two. An alert with
+no `severity` falls through to the root, which is the safe default — unclassified still
+means delivered.
+
+#### Why the ping needs a second contact point, and not a second template
+
+Because Grafana decides it, not us. From `receivers/discord/v1/discord.go` in
+`grafana/alerting`:
+
+```go
+// Discord only delivers @mention notifications from the top-level content field, not from
+// embed fields, so moving the message into the embed description is opt-in via
+// UseEmbedDescription.
+if d.settings.UseEmbedDescription {
+    msg.Content = ""
+} else {
+    msg.Content = messageContent
+}
+```
+
+`content` is **emptied outright** when the message moves into the embed. Since Discord
+raises a mention notification *only* from `content`, a ping and an embed description are
+mutually exclusive **per contact point**. No template can bridge that — hence two.
+
+What survives on the critical door: Grafana always attaches the embed, so the **red
+coloured title is unchanged**. What is lost: masked links. `[règle](url)` inside `content`
+renders as literal text, so that receiver carries **two bare URLs** (rule, logs) instead of
+three pretty ones. Silencing is one click from the rule page; a third long URL on a 03:00
+page is cost without benefit.
+
+#### The night mute drops, it does not defer
+
+`mute_time_intervals` **discards** notifications inside the window. Nothing is replayed at
+08:00. A warning that fires at 23:05 and resolves at 03:00 is never announced anywhere but
+Grafana's own history.
+
+That is accepted rather than overlooked: anything that must wake someone is a `critical`,
+and criticals never enter this timing. Two mechanical traps, both handled in the template:
+
+* **An Alertmanager time interval cannot cross midnight.** A single `23:00`–`08:00` entry is
+  accepted, never matches, and mutes nothing — it fails by *looking* configured. Hence two
+  ranges, `23:00–24:00` and `00:00–08:00`.
+* **Without `location`, times are UTC** — an hour off for half the year.
+
+The timing lives in its own `mutetimes.yml`, named so it sorts **before** `policies.yml`
+(c < m < p). Grafana walks the alerting folder in lexical order and *rejects* a policy
+referencing a mute timing it has not loaded — which would leave no routing at all. The role
+also asks Grafana whether the timing really loaded, because a rejected one fails silently:
+warnings simply keep arriving at 03:00 and nobody notices a suppression that never
+happened.
+
 ### Two verifications, because they prove different things
 
 | Check | Proves | When |
@@ -547,7 +617,112 @@ Two datasources now: Loki for what the services *say*, Prometheus for what they 
 | `greener-container-down-<service>` | Prometheus | an expected container stops running | `OK` | active |
 | `greener-restart-loop` | Prometheus | any project container starts more than `monitoring_alert_restart_threshold` times in `monitoring_alert_restart_window` | `OK` | active |
 | `greener-unhealthy-<service>` | Prometheus | a service that declares a healthcheck fails it past its grace period | `OK` | active |
+| `greener-edge-5xx` | Loki | Caddy served more than `monitoring_alert_edge_5xx_threshold` 5xx in the window | `OK` | active |
+| `greener-cpu-high` | Prometheus | load per core above `monitoring_alert_cpu_threshold` | `OK` | active |
+| `greener-disk-predict` | Prometheus | `/` is on track to fill within `monitoring_alert_disk_predict_horizon_days` days | `OK` | active |
+| `greener-memory-container[-critical]` | Prometheus | a container passes `monitoring_alert_container_memory_threshold`% of **its own limit** | `OK` | active |
+| `greener-tls-expiry-warning` / `-critical` | Prometheus | the served certificate expires within 21 / 7 days | `OK` | active |
+| `greener-pg-connections` | Prometheus | more than `monitoring_alert_pg_connections_threshold`% of `max_connections` | `OK` | active |
+| `greener-pg-down` | Prometheus | the PostgreSQL exporter stopped answering | **`Alerting`** | active |
 | `greener-silent-<service>` | Loki | a watched service stops logging | `Alerting` | **deleted by SCRUM-129** |
+
+### The rules added on 22/09/2026, and what each one closes
+
+* **`greener-cpu-high`** — the host dashboard had shown load per core since SCRUM-99 and
+  nothing alerted on it, while disk and RAM both had a rule. `node_load1` divided by the
+  core count, so the number means the same thing on any machine. `for: 15m`, longer than
+  disk or RAM: a build, a deploy or one AI request each spike the load for a minute.
+
+* **`greener-disk-predict`** — `greener-disk-low` says *you are at 85%*; this says *you have
+  three days*. On a 77 GB disk at 77%, deciding what to purge from Loki or Prometheus is
+  not a two-minute job, and being told at the threshold is being told too late.
+
+* **`greener-memory-container`** — `greener-memory-high` watches the *machine* and can never
+  name the service. This one can. The threshold is a share of the container's **own limit**,
+  read from `container_spec_memory_limit_bytes`, so changing a `mem_limit` in `app_stack`
+  moves the rule with it and nothing has to be kept in sync here. `ai` gets `critical`, the
+  rest `warning` — which is why it is two rules and not one: **a Grafana rule's labels are
+  static**, so one rule cannot carry two severities. Splitting the *selector* is the only way.
+
+  The `> 0` on the denominator is not defensive noise. A container with no limit reports 0,
+  and dividing by it yields `+Inf` — the rule would alert for ever. Filtering it out means
+  **an unlimited container is simply not covered**, which is the honest behaviour and the
+  reason `app_stack` now sets `mem_limit` on every service. That limit matters more than the
+  alert: without one the kernel picks its own victim under pressure, and it can just as
+  easily be Postgres as the service that actually leaked.
+
+* **`greener-edge-5xx`** — the closest thing to real API metrics without touching the backend
+  repo. Caddy already writes one JSON line per response into the journal and Alloy already
+  ships it, so `| json | status >= 500` costs one rule and no new component. It is the only
+  current signal on *how the API answers*, as opposed to whether its container is running.
+  It depends on `caddy_access_log` and on `format json` being **pinned** in the Caddyfile:
+  Caddy picks console format on a terminal and JSON otherwise, so the default works here by
+  accident, and the day that accident stops holding this rule matches nothing and says so to
+  nobody. An absolute count and not a ratio — at today's traffic one request and one error
+  is 100%.
+
+* **`greener-tls-expiry-*`** — Caddy exports **no** certificate-expiry metric (checked, it
+  has none), so the only way to see a failed ACME renewal is to fetch the certificate. The
+  blackbox probes run inside Alloy and go out through the *public* name, which is the point:
+  they measure what a browser is really served, chain and SNI included.
+
+  21 days is a consequence, not a preference: ACME renews at 30 days remaining, so crossing
+  21 means **a renewal has already failed**. The warning uses `within_range [7, 21]` rather
+  than a plain `lt`, or both rules would fire under 7 days and the channel would get the
+  same certificate twice.
+
+  These probes leave **from** the VPS, so they can say nothing about the VPS being down.
+  That case belongs to UptimeRobot (`docs/uptime-externe.md`), which is configured.
+
+* **`greener-pg-connections` / `greener-pg-down`** — the most common way a healthy-looking
+  API takes the database down is connections opened and never returned: the container stays
+  up, existing queries keep working, and then nothing can connect at all. Nothing else in
+  this stack sees it.
+
+  **Read `greener-pg-down`'s `noDataState` backwards, like the container-down rules but for
+  the opposite reason.** It is the only rule here with `noDataState: Alerting`. An exporter
+  that dies produces no series, the PostgreSQL dashboard goes quietly empty, and an empty
+  dashboard looks exactly like a healthy one. `Alerting` is what makes that silence audible.
+  One rule covers both `pg_up == 0` (exporter alive, database unreachable) and no `pg_up` at
+  all (exporter gone).
+
+### The PostgreSQL exporter bridges the two networks, deliberately
+
+It is the one container on both `greener_monitoring` and the application's
+`greener_internal`. It has to be: it queries Postgres, which lives only on the second, and
+Alloy scrapes it, and Alloy lives only on the first.
+
+The "keep the networks isolated" alternative was to publish the exporter on a host port and
+scrape it through the host. That is **worse, not better**: a container cannot reach a
+`127.0.0.1`-published port (`host-gateway` resolves to the bridge address, not loopback), so
+it would have to publish on `0.0.0.0` while the firewall role is still a stub. A private
+container-to-container link beats a port open to the internet.
+
+Its credentials live in their own `postgres-exporter.env` (0600), not in Grafana's: there is
+no reason for this container to hold the Grafana admin password. The DSN is a URL, so the
+password is percent-encoded — **and `urlencode` alone is not enough**, since Jinja quotes
+with `safe='/'` and leaves slashes untouched. A password containing `/` would sail through
+and cut the DSN in half; the explicit `replace('/', '%2F')` is what stops it. Found on a
+rendered file, not reasoned about.
+
+Known shortcut: it connects as the **application** user rather than a dedicated
+`pg_monitor` role, because creating that role needs a database-side task the backend owns.
+
+### Deploy annotations
+
+`deploy.yml` POSTs a `deploy`-tagged annotation to Grafana at the end of every deployment,
+and all five dashboards render it. The first question of any incident is *did this start
+after a deploy?*, and answering it by cross-reading two tools is the kind of friction that
+makes people not answer it at all.
+
+Posted from the playbook rather than derived from container start times, because only the
+playbook knows **which version** went out — that is the whole value of the marker.
+
+It is the one thing here that may be absent: `vault_grafana_annotation_token` is created by
+hand (Grafana → Administration → Service accounts), so an environment without it still
+deploys and simply gets no marker. Three guards say the same thing — no token skips the
+task, `failed_when: false` survives a Grafana that is down, and a failure is *reported*
+rather than raised. **A deployment must never fail because a graph lost a note.**
 
 ### The summaries carry the measured value
 

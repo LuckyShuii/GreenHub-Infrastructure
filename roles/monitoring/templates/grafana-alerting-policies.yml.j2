@@ -4,6 +4,11 @@
 # an email contact point that does not exist here (no SMTP is configured). That is the
 # intent: everything this stack raises goes to one Discord channel, and nothing can be
 # raised to a receiver nobody reads.
+#
+# DECISION (LBT, 22/09/2026): ONE channel, and that has not changed. The tree below does
+# not send anything anywhere else — both receivers post to the same webhook. What the
+# branches decide is how LOUD a message is: whether it pings, and whether it is allowed to
+# arrive at 03:00.
 apiVersion: 1
 
 policies:
@@ -22,3 +27,40 @@ policies:
     # Re-notify about a still-firing group only this often. Deliberately long: the point is
     # to be reminded, not to be drowned while already fixing the thing.
     repeat_interval: {{ monitoring_alert_repeat_interval }}
+
+    # Matched IN ORDER, first match wins (no `continue` anywhere on purpose — a critical
+    # must produce one message, not two). Anything without a `severity` label falls through
+    # both branches and lands on the root receiver, which is the safe default: an
+    # unclassified alert is still delivered, just without a ping.
+    routes:
+      # --- critical: pings, and is never muted ------------------------------------------
+      - receiver: {{ monitoring_alert_contact_point_critical }}
+        object_matchers:
+          - ['severity', '=', 'critical']
+        # Inherited values are NOT inherited once a child route sets any of its own in some
+        # Alertmanager versions, so they are repeated rather than assumed.
+        group_by:
+{% for label in monitoring_alert_group_by %}
+          - {{ label }}
+{% endfor %}
+        group_wait: {{ monitoring_alert_group_wait }}
+        group_interval: {{ monitoring_alert_group_interval }}
+        repeat_interval: {{ monitoring_alert_repeat_interval }}
+        # No mute_time_intervals. Deliberate and load-bearing: a critical at 04:00 is
+        # exactly the message this whole split exists to deliver.
+
+      # --- warning: quiet embed, silent at night -----------------------------------------
+      - receiver: {{ monitoring_alert_contact_point }}
+        object_matchers:
+          - ['severity', '=', 'warning']
+        group_by:
+{% for label in monitoring_alert_group_by %}
+          - {{ label }}
+{% endfor %}
+        group_wait: {{ monitoring_alert_group_wait }}
+        group_interval: {{ monitoring_alert_group_interval }}
+        repeat_interval: {{ monitoring_alert_repeat_interval }}
+{% if monitoring_alert_night_mute_enabled | bool %}
+        mute_time_intervals:
+          - {{ monitoring_alert_night_mute_name }}
+{% endif %}

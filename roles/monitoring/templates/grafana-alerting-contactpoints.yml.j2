@@ -3,6 +3,10 @@
 # Contains NO secret. Grafana interpolates $VAR inside provisioning files, so the webhook
 # URL is read from {{ monitoring_env_file }} (0600) at load time, and this file stays 0644
 # and fully visible in --check --diff.
+#
+# TWO contact points, ONE webhook, ONE channel. The split is not about where the message
+# lands — it is about whether it pings. See the critical receiver below for why that
+# cannot be done with a single one.
 apiVersion: 1
 
 contactPoints:
@@ -25,9 +29,8 @@ contactPoints:
           #
           # THE COST, and it is a real one: Discord only delivers @mention notifications
           # from `content`. With the message inside the embed, an `@here` or `<@id>` added
-          # to the template below would render as text and ping nobody, silently. Nothing
-          # here mentions anyone today; if that changes, the mention has to go back into
-          # `content`, which means turning this off and losing the masked links.
+          # to the template below would render as text and ping nobody, silently. That is
+          # precisely why the critical receiver below exists and turns this OFF.
           use_embed_description: true
 
           # The values below are GO templates for Grafana, not Jinja: wrapped in raw so
@@ -71,3 +74,61 @@ contactPoints:
             {{ end }}`{{ .CommonLabels.env }}` · `{{ .CommonLabels.service }}` · `{{ .CommonLabels.severity }}`
             {{ range .Alerts }}[règle]({{ .GeneratorURL }}){{ if eq .Status "firing" }} · [silence]({{ .SilenceURL }}){{ end }}{{ if ne .Labels.service "host" }} · [logs]({% endraw %}{{ monitoring_alert_logs_link_base }}{% raw %}/d/greener-logs/?var-service={{ .Labels.service }}&from=now-1h&to=now){{ end }}
             {{ end }}{% endraw %}
+
+  # --- The critical door ------------------------------------------------------------------
+  # Same webhook, same channel, same title template. One difference, and it is forced on us
+  # by Grafana rather than chosen: this receiver must PING, and a ping only works from the
+  # payload's top-level `content`.
+  #
+  # Read receivers/discord/v1/discord.go in grafana/alerting:
+  #
+  #     if d.settings.UseEmbedDescription {
+  #         msg.Content = ""
+  #     } else {
+  #         msg.Content = messageContent
+  #     }
+  #
+  # `content` is emptied OUTRIGHT when the message moves into the embed. There is no
+  # template trick that puts a mention in one and the body in the other — the two are
+  # mutually exclusive per contact point, which is why this is a second contact point and
+  # not a second template.
+  #
+  # WHAT SURVIVES: the embed is still attached (Grafana always sends one), so the coloured
+  # red title is unchanged. WHAT IS LOST: masked links. `[règle](url)` in `content` renders
+  # as literal text, so the links below are bare URLs — and there are two, not three.
+  # Silencing is one click away from the rule page, and a third long URL on a 03:00 page is
+  # cost without benefit.
+  - orgId: {{ monitoring_grafana_org_id }}
+    name: {{ monitoring_alert_contact_point_critical }}
+    receivers:
+      - uid: {{ monitoring_alert_contact_point_critical }}
+        type: discord
+        disableResolveMessage: false
+        settings:
+          url: ${{ monitoring_alert_webhook_env }}
+          use_embed_description: false
+
+          title: >-
+            {% raw %}{{ if eq .Status "firing" }}🔴{{ else }}✅{{ end }} {{ .CommonLabels.alertname }}{% endraw %}
+
+          # The mention is FIRING-ONLY. Being pinged to be told something recovered is how a
+          # channel gets muted, which would defeat the entire purpose of this receiver.
+{% if monitoring_alert_critical_mention | length > 0 %}
+          message: |-
+            {% raw %}{{ if eq .Status "firing" }}{% endraw %}{{ monitoring_alert_critical_mention }}{% raw %}
+            {{ range .Alerts }}{{ .Annotations.summary }}
+            {{ end }}{{ else }}Retour à la normale.
+            {{ end }}`{{ .CommonLabels.env }}` · `{{ .CommonLabels.service }}` · `{{ .CommonLabels.severity }}`
+            {{ range .Alerts }}Règle : {{ .GeneratorURL }}{{ if ne .Labels.service "host" }}
+            Logs : {% endraw %}{{ monitoring_alert_logs_link_base }}{% raw %}/d/greener-logs/?var-service={{ .Labels.service }}&from=now-1h&to=now{{ end }}
+            {{ end }}{% endraw %}
+{% else %}
+          # monitoring_alert_critical_mention is empty: the route still exists (and still
+          # escapes the night mute), it simply pings nobody.
+          message: |-
+            {% raw %}{{ if eq .Status "firing" }}{{ range .Alerts }}{{ .Annotations.summary }}
+            {{ end }}{{ else }}Retour à la normale.
+            {{ end }}`{{ .CommonLabels.env }}` · `{{ .CommonLabels.service }}` · `{{ .CommonLabels.severity }}`
+            {{ range .Alerts }}Règle : {{ .GeneratorURL }}
+            {{ end }}{% endraw %}
+{% endif %}

@@ -159,6 +159,31 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+{% if monitoring_postgres_exporter_enabled | bool %}
+
+  # The one container that touches both worlds. It has to: it queries PostgreSQL, which
+  # only lives on the application network, and it is scraped by Alloy, which only lives on
+  # this one. The alternative — publishing it on a host port — is worse, not better: a
+  # container cannot reach a 127.0.0.1-published port (host-gateway resolves to the bridge
+  # address), so it would have to publish on 0.0.0.0 while the firewall role is a stub.
+  # A private container-to-container link beats a port open to the internet.
+  #
+  # Its credentials come from their OWN 0600 env file, not the Grafana one: there is no
+  # reason for this container to hold the Grafana admin password.
+  postgres_exporter:
+    image: {{ monitoring_postgres_exporter_image }}
+    restart: unless-stopped
+    env_file:
+      - {{ monitoring_postgres_exporter_env_file }}
+    # Never published: only Alloy scrapes it, on the monitoring network.
+    expose:
+      - "{{ monitoring_postgres_exporter_port }}"
+    networks:
+      - {{ monitoring_network }}
+      - {{ monitoring_app_network }}
+    # No healthcheck: the image carries no shell. Whether it is really answering is
+    # covered far better by greener-pg-down, which alerts on the ABSENCE of its metrics.
+{% endif %}
 
 volumes:
   {{ monitoring_loki_data_volume }}:
@@ -169,3 +194,11 @@ volumes:
 networks:
   {{ monitoring_network }}:
     driver: bridge
+{% if monitoring_postgres_exporter_enabled | bool %}
+  # Created by the app_stack compose project, never by this one — hence external. The
+  # monitoring role runs after app_stack in site.yml, so it exists by the time compose
+  # looks for it; a bring-up before the application has ever been deployed fails here,
+  # loudly, which is the correct outcome.
+  {{ monitoring_app_network }}:
+    external: true
+{% endif %}
