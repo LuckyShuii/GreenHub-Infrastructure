@@ -316,6 +316,41 @@ monitoring_alert_disk_for: 10m
 monitoring_alert_memory_threshold: 90
 monitoring_alert_memory_for: 10m
 
+# Restart loop. THE gap the other rules leave: a container that dies and comes back every
+# minute is `running` most of the time, so greener-container-down-* never fills its 5 min
+# `for`, and the external probe (SCRUM-90) sees a facade that answers between two deaths.
+#
+# `changes()` on the container's start time counts restarts. A DEPLOY does not trip it: a
+# compose recreate gives the container a new id, so cAdvisor starts a fresh series whose
+# start time has never changed. Only a restart in place — which is what a crash loop is —
+# moves the value of an existing series.
+monitoring_alert_restart_window: 15m
+# Strictly greater than, so this is "4 starts in 15 minutes". One restart is an incident
+# recovering by itself; three in a quarter of an hour is a loop.
+monitoring_alert_restart_threshold: 3
+monitoring_alert_restart_for: 2m
+
+# Docker healthchecks, which say more than "the process exists". cAdvisor encodes
+# container_health_state as 1 healthy, 0 starting OR unhealthy, -1 no healthcheck declared.
+#
+# TWO TRAPS, both verified against production rather than assumed:
+#
+# 1. The gateway declares NO healthcheck and this cAdvisor reports it as 0, not -1 — so on
+#    this build 0 cannot tell "no probe" from "failing". That is why this is a MAP of the
+#    services that really declare one, and not the expected-containers list: a rule over
+#    the gateway would fire for ever.
+# 2. "starting" is also 0, so each grace period must outlast that service's start_period in
+#    app_stack. The AI service indexes every region before answering and its start_period
+#    is 20 MINUTES, so a uniform 5 min would page on every single AI restart.
+#
+# Adding a healthcheck to a service means adding it here; removing one means removing it
+# here, or its rule alerts for ever on a -1 that never becomes 1.
+monitoring_alert_healthcheck_grace:
+  postgres: 5m
+  backend: 5m
+  qdrant: 5m
+  ai: 25m
+
 # Query time range in seconds for the metric rules.
 monitoring_alert_metrics_range: 600
 
@@ -329,8 +364,12 @@ monitoring_alert_silence_uids: >-
 monitoring_alert_container_down_uids: >-
   {{ monitoring_alert_expected_containers
      | map('regex_replace', '^', 'greener-container-down-') | list }}
+monitoring_alert_unhealthy_uids: >-
+  {{ monitoring_alert_healthcheck_grace.keys() | list
+     | map('regex_replace', '^', 'greener-unhealthy-') | list }}
 monitoring_alert_metrics_uids: >-
-  {{ ['greener-disk-low', 'greener-memory-high'] + monitoring_alert_container_down_uids }}
+  {{ ['greener-disk-low', 'greener-memory-high', 'greener-restart-loop']
+     + monitoring_alert_container_down_uids + monitoring_alert_unhealthy_uids }}
 # Everything this role can deploy, whatever the current flags.
 monitoring_alert_all_uids: >-
   {{ ['greener-error-rate'] + monitoring_alert_silence_uids + monitoring_alert_metrics_uids }}

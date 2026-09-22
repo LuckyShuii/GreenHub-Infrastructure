@@ -536,8 +536,7 @@ Rules are code, like the dashboards: `provisioning/alerting/rules.yml`, rendered
 **Alerting → Alert rules → Export** in provisioning format, commit the YAML here, and
 delete the UI rule.
 
-Everything queries Loki, because Loki is the only datasource that exists yet. Real
-container-state rules need metrics ([SCRUM-99](https://greener-epitech.atlassian.net/browse/SCRUM-99)).
+Two datasources now: Loki for what the services *say*, Prometheus for what they *do*.
 
 | Rule | Datasource | Fires when | `noDataState` | State |
 |---|---|---|---|---|
@@ -545,7 +544,53 @@ container-state rules need metrics ([SCRUM-99](https://greener-epitech.atlassian
 | `greener-disk-low` | Prometheus | the root filesystem passes `monitoring_alert_disk_threshold`% | `OK` | active |
 | `greener-memory-high` | Prometheus | less than 10% of RAM available, cache excluded | `OK` | active |
 | `greener-container-down-<service>` | Prometheus | an expected container stops running | `OK` | active |
+| `greener-restart-loop` | Prometheus | any project container starts more than `monitoring_alert_restart_threshold` times in `monitoring_alert_restart_window` | `OK` | active |
+| `greener-unhealthy-<service>` | Prometheus | a service that declares a healthcheck fails it past its grace period | `OK` | active |
 | `greener-silent-<service>` | Loki | a watched service stops logging | `Alerting` | **deleted by SCRUM-129** |
+
+### The restart loop is the one nothing else catches
+
+A container that dies and comes back every minute is `running` most of the time. It never
+fills the 5-minute `for` of `greener-container-down-*`, and the external probe (SCRUM-90)
+sees a facade that answers between two deaths — so without this rule, a crash loop is
+invisible to the whole stack.
+
+It counts restarts as `changes()` on `container_start_time_seconds`, and there is a nice
+property hidden in that choice: **a deploy does not trip it**. A compose recreate gives the
+container a new id, so cAdvisor opens a fresh series whose start time has never changed.
+Only a restart *in place* moves the value of an existing series — which is exactly what a
+crash loop is, and nothing else on this host does it.
+
+This is the one rule that is **not** written per service. The others are, because a series
+that has vanished cannot be grouped over; here the container is running and the series
+exists, so a single rule with `max by (service, env)` yields one instance per service.
+Its `service` label therefore comes from the query, and the rule must NOT set a static one
+— that would flatten every service onto a single alert.
+
+### `container_health_state` cannot tell "no probe" from "broken"
+
+cAdvisor encodes it `1` healthy, `0` starting **or** unhealthy, `-1` no healthcheck
+declared. Two things follow, both found against production rather than reasoned about:
+
+**The gateway declares no healthcheck and this build reports it as `0`, not `-1`.** So on
+this stack a naive `== 0` rule fires for ever on a container that is perfectly fine. That
+is why `monitoring_alert_healthcheck_grace` is a **map of the services that really declare
+a probe** rather than the expected-containers list. Adding a healthcheck to a service means
+adding it here; removing one means removing it here, or its rule alerts for ever.
+
+**"Starting" also reads as `0`,** so each grace period has to outlast that service's
+`start_period` in `app_stack`. They are not uniform for a reason:
+
+| Service | `start_period` | `for` |
+|---|---|---|
+| `postgres` | 10s | 5m |
+| `backend` | 15s | 5m |
+| `qdrant` | 30s | 5m |
+| `ai` | **20m** — it indexes every region before uvicorn answers | **25m** |
+
+A uniform five minutes would page on every single AI restart, which is the kind of rule
+people learn to ignore. The threshold is `within_range [-0.5, 0.5]` and not `lt 1`
+precisely so that `-1` is excluded: "nobody is checking" is not "it is broken".
 
 ### Tuning the error rate on real traffic
 
