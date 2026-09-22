@@ -45,8 +45,9 @@ deploy_version_pattern: "^([0-9a-f]{7,40}|latest)$"
 # none of them covers is a Grafana CVE reachable from the internet — only the network
 # restriction fixes that.
 #
-# Condition to lift: SCRUM-58 (VPN), then SCRUM-129 binds Grafana to the VPN IP and deletes
-# this variable. While on, it needs a DNS record for grafana.<caddy_domain>.
+# Condition to lift: SCRUM-58 (VPN). Binding Grafana to the VPN address and deleting this
+# variable is part of that ticket — SCRUM-129 was narrowed to the log sources and closed.
+# While on, it needs a DNS record for grafana.<caddy_domain>.
 # Shared here because caddy (the vhost) and monitoring (root URL + hardening) both need the
 # same answer.
 grafana_public: true

@@ -359,9 +359,10 @@ deliberately **not** rendered when it is off. Their presence in the running conf
 signal that the exposure is still on.
 
 **The residual risk none of this covers** is a Grafana CVE being reachable from the
-internet. Only the network restriction fixes that, which is what makes SCRUM-58 and then
-[SCRUM-129](https://greener-epitech.atlassian.net/browse/SCRUM-129) — Grafana bound to the
-VPN IP, this variable deleted — the real answer rather than a nice-to-have.
+internet. Only the network restriction fixes that, which is what makes
+[SCRUM-58](https://greener-epitech.atlassian.net/browse/SCRUM-58) — the VPN, then Grafana
+bound to its address and this variable deleted — the real answer rather than a
+nice-to-have.
 
 A basic-auth gate in Caddy was considered and dropped: it would shield Grafana even against
 a CVE, but at the cost of a second credential to distribute to seven people. Reconsider it
