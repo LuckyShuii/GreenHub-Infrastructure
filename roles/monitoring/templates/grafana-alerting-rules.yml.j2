@@ -310,4 +310,139 @@ groups:
             {{ monitoring_alert_container_down_for }}.
         isPaused: false
 {% endfor %}
+
+      # --- Restart loop ------------------------------------------------------------------
+      # The gap every other rule leaves open. A container that dies and comes back every
+      # minute is `running` most of the time, so greener-container-down-* never fills its
+      # 5 min `for`, and the external probe (SCRUM-90) sees a facade answering between two
+      # deaths. Nobody is told.
+      #
+      # ONE rule for every service, unlike the down rules, and for the opposite reason:
+      # here the series EXISTS — the container is running — so `by (service)` returns one
+      # instance per service, and a missing series is not what we are looking for.
+      #
+      # A deploy does not trip this. A compose recreate gives the container a new id, so
+      # cAdvisor opens a fresh series whose start time has never changed; only a restart in
+      # place moves the value of an existing series, which is exactly what a crash loop is.
+      - uid: greener-restart-loop
+        title: Boucle de redémarrage
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: >-
+                max by (service, env) (changes(container_start_time_seconds{project="{{
+                monitoring_app_compose_project }}"}[{{ monitoring_alert_restart_window }}]))
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [{{ monitoring_alert_restart_threshold }}]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: OK
+        execErrState: Alerting
+        for: {{ monitoring_alert_restart_for }}
+        # No static service label here, unlike every rule above: this query RETURNS one, and
+        # a static label would flatten every service onto a single alert instance.
+        labels:
+          severity: critical
+        annotations:
+          summary: >-
+            Plus de {{ monitoring_alert_restart_threshold }} redémarrages en
+            {{ monitoring_alert_restart_window }}.
+        isPaused: false
+{% for svc, grace in monitoring_alert_healthcheck_grace.items() %}
+
+      # --- {{ svc }} fails its healthcheck ------------------------------------------------
+      # Finer than "is it running": a container can run while failing its own probe.
+      #
+      # READ THE THRESHOLD CAREFULLY. cAdvisor encodes container_health_state as 1 healthy,
+      # 0 starting OR unhealthy, -1 no healthcheck declared — so the window is centred on 0
+      # and must EXCLUDE -1, which means "nobody is checking" rather than "it is broken".
+      # Hence within_range and not a plain `lt 1`.
+      #
+      # `for: {{ grace }}` is not a round number picked for comfort: "starting" also reads as 0, so
+      # it has to outlast {{ svc }}'s start_period in app_stack — 20 minutes for the AI service,
+      # which indexes every region before it answers.
+      - uid: greener-unhealthy-{{ svc }}
+        title: Healthcheck {{ svc }} en échec
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              # Aggregated, though a single container answers: the raw series drags `id`,
+              # `image` and `name` along, and `id` changes on every recreate — each deploy
+              # would mint a brand new alert instance. It also makes a recreate err towards
+              # silence, the fresh container reading 0 while the old one still reads 1.
+              expr: >-
+                max by (service, env) (container_health_state{project="{{
+                monitoring_app_compose_project }}", service="{{ svc }}"})
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: within_range
+                    params: [-0.5, 0.5]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        # A container that has disappeared produces no series at all, and that case belongs
+        # to greener-container-down-{{ svc }}. Silence is not this rule's business.
+        noDataState: OK
+        execErrState: Alerting
+        for: {{ grace }}
+        labels:
+          env: {{ env_name }}
+          service: {{ svc }}
+          severity: critical
+        annotations:
+          summary: >-
+            Le conteneur {{ svc }} tourne mais échoue son healthcheck depuis {{ grace }}.
+        isPaused: false
+{% endfor %}
 {% endif %}
