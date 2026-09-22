@@ -434,8 +434,8 @@ Two more things the template leans on:
   make: warning versus critical.
 * `summary` is ranged over per alert rather than read from `.CommonAnnotations`. An
   annotation only lands in `CommonAnnotations` when it is byte-identical across the whole
-  group — so the day a rule templates a measured value into its summary, the common one
-  goes empty and the message would silently lose its only sentence.
+  group — and four rules now template their **measured value** into the summary, so the
+  common one is empty and reading it would leave the message with no sentence at all.
 
 The `logs` link is a deep link into the `greener-logs` dashboard with the service
 pre-selected, which only works because the metric label and the log label are both called
@@ -547,6 +547,31 @@ Two datasources now: Loki for what the services *say*, Prometheus for what they 
 | `greener-restart-loop` | Prometheus | any project container starts more than `monitoring_alert_restart_threshold` times in `monitoring_alert_restart_window` | `OK` | active |
 | `greener-unhealthy-<service>` | Prometheus | a service that declares a healthcheck fails it past its grace period | `OK` | active |
 | `greener-silent-<service>` | Loki | a watched service stops logging | `Alerting` | **deleted by SCRUM-129** |
+
+### The summaries carry the measured value
+
+`{{ $values.A.Value }}` is the number query `A` returned **for that instance**, so the
+message says `Le disque racine est à 92.0 % d'occupation (seuil 85 %)` rather than
+repeating the threshold back at you. It works the same on Loki — `15 erreurs en 5m sur ce
+service (seuil 10)`.
+
+This is what makes each alert's summary different from its neighbour's, which is exactly
+why the contact point ranges over `.Alerts` instead of reading `.CommonAnnotations`. The
+two changes only work together.
+
+### Proving a rule change before it reaches the channel
+
+A rule that provisions cleanly can still be wrong, and the channel is a bad place to find
+out. The whole chain runs locally: a Python script serving a `/metrics` file with the
+numbers you want, `prom/prometheus` scraping it, `grafana/grafana` at the pinned version
+with the **rendered** provisioning files, and the webhook pointed at a listener that dumps
+the JSON Discord would have received.
+
+Render the templates with the real defaults, override the `for` delays to `0s` so a run
+takes a minute instead of twenty-five, and read the captured payload. Every rule in the
+table above was checked that way, including its rendered summary, its emoji and its links.
+It is also how the `.ExternalURL` double slash and the resolved message repeating a
+problem in the present tense were caught — neither is visible from the YAML.
 
 ### The restart loop is the one nothing else catches
 

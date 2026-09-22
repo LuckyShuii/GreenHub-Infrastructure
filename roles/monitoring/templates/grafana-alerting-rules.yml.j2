@@ -63,8 +63,9 @@ groups:
           severity: warning
         annotations:
           summary: >-
-            Plus de {{ monitoring_alert_error_threshold }} erreurs en
-            {{ monitoring_alert_error_window }} sur ce service.
+            {% raw %}{{ printf "%.0f" $values.A.Value }}{% endraw %} erreurs en
+            {{ monitoring_alert_error_window }} sur ce service
+            (seuil {{ monitoring_alert_error_threshold }}).
         isPaused: false
 {% if monitoring_alert_silence_enabled | bool %}
 {% for svc in monitoring_alert_watched_services %}
@@ -190,9 +191,15 @@ groups:
           severity: critical
         # One sentence. This annotation IS the Discord message body (see the contact
         # point), so what to do about it belongs in the README, not in every alert.
+        #
+        # `$values.A.Value` is the number query A returned FOR THIS INSTANCE — the reason
+        # the contact point ranges over .Alerts instead of reading .CommonAnnotations: the
+        # moment a summary carries a measured value it stops being identical across the
+        # group, and a common annotation would go empty.
         annotations:
           summary: >-
-            Le disque racine dépasse {{ monitoring_alert_disk_threshold }} % d'occupation.
+            {% raw %}Le disque racine est à {{ printf "%.1f" $values.A.Value }} %{% endraw %}
+            d'occupation (seuil {{ monitoring_alert_disk_threshold }} %).
         isPaused: false
 
       # --- Memory ------------------------------------------------------------------------
@@ -244,8 +251,8 @@ groups:
           severity: warning
         annotations:
           summary: >-
-            Plus de {{ monitoring_alert_memory_threshold }} % de la RAM occupée
-            (hors cache réclamable).
+            {% raw %}{{ printf "%.1f" $values.A.Value }} %{% endraw %} de la RAM occupée,
+            hors cache réclamable (seuil {{ monitoring_alert_memory_threshold }} %).
         isPaused: false
 {% for svc in monitoring_alert_expected_containers %}
 
@@ -372,8 +379,9 @@ groups:
           severity: critical
         annotations:
           summary: >-
-            Plus de {{ monitoring_alert_restart_threshold }} redémarrages en
-            {{ monitoring_alert_restart_window }}.
+            {% raw %}{{ printf "%.0f" $values.A.Value }}{% endraw %} démarrages en
+            {{ monitoring_alert_restart_window }}
+            (seuil {{ monitoring_alert_restart_threshold }}).
         isPaused: false
 {% for svc, grace in monitoring_alert_healthcheck_grace.items() %}
 
