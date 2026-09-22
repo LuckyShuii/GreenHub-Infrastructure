@@ -165,22 +165,7 @@ monitoring_drop_healthcheck_logs: true
 # down, to delete the alert rules that depended on it. Delete them only once that teardown
 # has been applied to every environment, or a timer survives on the host with nothing left
 # to manage it.
-monitoring_sample_logs_enabled: false
-monitoring_sample_log_dir: /var/log/greener-sample
-monitoring_sample_services: [backend, ai, postgres, caddy]
-monitoring_sample_levels: [debug, info, info, info, warn, error]
-monitoring_sample_messages:
-  - "request completed"
-  - "connection pool acquired"
-  - "cache miss, falling back to store"
-  - "slow query detected"
-  - "upstream returned a non-2xx status"
-  - "scheduled task finished"
-monitoring_sample_script: /usr/local/bin/greener-logsample
-monitoring_sample_unit: greener-logsample
-monitoring_sample_interval: "1min"
 # Lines kept per file: the generator trims itself, so a throwaway source needs no logrotate.
-monitoring_sample_max_lines: 2000
 
 # docker compose --wait budget for the bring-up (seconds).
 monitoring_wait_timeout: 300
@@ -266,43 +251,14 @@ monitoring_alert_error_for: 5m
 # Query time range in seconds. Must comfortably exceed the window above.
 monitoring_alert_error_range: 600
 
-# Silence rule = the provisional "service is down" proxy, and the reason there is ONE RULE
-# PER SERVICE: a dead service stops producing a Loki stream, so it vanishes from the result
-# set instead of reporting zero. A single rule aggregating every service would therefore
-# never notice one of them dying. Per-service rules turn that disappearance into NoData on
-# a named rule, which noDataState promotes to an alert.
-#
-# THE ASSUMPTION THIS RULE MAKES, AND WHY IT IS TIED TO THE GENERATOR:
-# it treats silence as death, which only holds for a source that logs unconditionally. The
-# generator does (1-5 lines per service per minute, no matter what). The real services do
-# NOT: a FastAPI backend logs on request, so at 03:00 with no users it emits nothing, and
-# this rule would page for a service that is perfectly healthy. Caddy and the AI service
-# behave the same, Postgres is near-silent at rest.
-#
-# THAT DAY HAS COME (SCRUM-129), so these rules are OFF and the teardown below deletes
-# them from Grafana. They are kept in the code, not deleted, until the teardown has run in
-# every environment — a provisioned rule whose file disappears keeps evaluating forever.
-# Real "is this container alive" detection is SCRUM-99, and the information already exists
-# on the host: app_stack defines Docker healthchecks for backend, postgres, qdrant and ai.
-# It is simply not exposed to Grafana yet.
-#
-# The rule was also slow by nature: it had to wait out the window before concluding.
-monitoring_alert_silence_enabled: "{{ monitoring_sample_logs_enabled }}"
-# The uids to delete are the ones that were DEPLOYED, so this stays the generator's list.
-# Pointing it at the real services would orphan the four rules Grafana still holds.
-monitoring_alert_watched_services: "{{ monitoring_sample_services }}"
-monitoring_alert_silence_window: 10m
-monitoring_alert_silence_for: 10m
-monitoring_alert_silence_range: 1800
-
 # --- Metric-based rules (SCRUM-99) ------------------------------------------------------
 # These are the rules the log-based ones could never be. cAdvisor emits series for a
 # container as long as it RUNS, whatever the container says or does not say, so a
 # disappearance means death rather than a quiet night.
 monitoring_alert_metrics_rules_enabled: true
 
-# The services expected to be running. Unlike the log silence rules this list is the REAL
-# one, because absence here is a fact about the container and not about its chattiness.
+# The services expected to be running. This list can be the REAL one, because absence here
+# is a fact about the container rather than about how talkative it is.
 monitoring_alert_expected_containers: [gateway, backend, ai, postgres, qdrant]
 monitoring_alert_container_down_for: 5m
 
@@ -357,10 +313,10 @@ monitoring_alert_metrics_range: 600
 # Stable uids, split wanted/unwanted like the Grafana accounts in users.yml. Removing a
 # rule from the rendered file does NOT remove it from Grafana, which keeps provisioned
 # resources in its own database — so every uid this role knows must be either declared or
-# explicitly deleted. Without the unwanted list, turning the silence rules off would leave
-# them evaluating and notifying forever.
-monitoring_alert_silence_uids: >-
-  {{ monitoring_alert_watched_services | map('regex_replace', '^', 'greener-silent-') | list }}
+# explicitly deleted. This is exactly what retired the greener-silent-* rules: they were
+# turned off, the teardown deleted them from Grafana, and only then was their code removed.
+# KEEP THE SAME ORDER for anything retired later, or the rules outlive their code and go on
+# notifying with nothing in the repository to explain them.
 monitoring_alert_container_down_uids: >-
   {{ monitoring_alert_expected_containers
      | map('regex_replace', '^', 'greener-container-down-') | list }}
@@ -372,11 +328,10 @@ monitoring_alert_metrics_uids: >-
      + monitoring_alert_container_down_uids + monitoring_alert_unhealthy_uids }}
 # Everything this role can deploy, whatever the current flags.
 monitoring_alert_all_uids: >-
-  {{ ['greener-error-rate'] + monitoring_alert_silence_uids + monitoring_alert_metrics_uids }}
+  {{ ['greener-error-rate'] + monitoring_alert_metrics_uids }}
 # What rules.yml declares on this run.
 monitoring_alert_wanted_uids: >-
   {{ (['greener-error-rate']
-      + (monitoring_alert_silence_enabled | bool | ternary(monitoring_alert_silence_uids, []))
       + (monitoring_alert_metrics_rules_enabled | bool
          | ternary(monitoring_alert_metrics_uids, [])))
      if monitoring_alert_rules_enabled | bool else [] }}

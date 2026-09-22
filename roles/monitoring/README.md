@@ -609,27 +609,27 @@ To exercise the whole path on demand, deploy once with
 ### Why the silence rules are gone
 
 They were the provisional "service is down" proxy, and they rested on an assumption that
-**died with the generator**: that silence means death. That only holds for a source which
-logs unconditionally. The generator did — 1 to 5 lines per service per minute, whatever
-happened. The real services do not: a FastAPI backend logs on request, so at 03:00 with no
-users it emits nothing, and the rule would have paged for a service in perfect health.
-Caddy and the AI service behave the same way, and Postgres is near-silent at rest.
+died with the synthetic log generator they were built against: **that silence means
+death**. That only holds for a source which logs unconditionally. The generator did — a
+few lines per service per minute, whatever happened. The real services do not: a FastAPI
+backend logs on request, so at 03:00 with no users it emits nothing, and the rule would
+have paged for a service in perfect health. Caddy and the AI service behave the same way,
+and Postgres is near-silent at rest.
 
-That is why they defaulted to following the generator:
+Production confirmed it before a single alert was written: four of the five containers had
+produced no log line for over an hour while being entirely healthy, simply because nothing
+had asked them to do anything.
 
-```yaml
-monitoring_alert_silence_enabled: "{{ monitoring_sample_logs_enabled }}"
-```
+A pager that cries at 03:00 for a healthy service is worse than no pager at all — it
+teaches the team to ignore the channel. `greener-container-down-*` replaced them, on
+metrics rather than chatter.
 
-Turning the sample logs off therefore deleted them, by uid, rather than letting them reach
-real traffic through forgetfulness. A pager that cries at 03:00 for a healthy service is
-worse than no pager at all — it teaches the team to ignore the channel.
-
-Their code and uid list stay in the role until the teardown has been applied to every
-environment: a provisioned rule whose file merely disappears keeps evaluating forever (see
-*Disabling them deletes them* below). `monitoring_alert_watched_services` therefore still
-points at the generator's service list — those are the uids Grafana holds and must be told
-to delete. Pointing it at the real services would orphan the four rules that exist.
+**How they were retired, which is the part worth copying.** They were switched off, the
+uid teardown deleted them from Grafana, the host and the Grafana API were both checked to
+be clean, and only then was their code removed along with the generator's. In that order,
+always: a provisioned rule whose file merely disappears keeps evaluating forever, so
+deleting the code first would have left four rules notifying with nothing in the
+repository to explain them.
 
 ### What actually detects a dead service
 
@@ -746,25 +746,11 @@ a user can still change it. They simply do not get to keep it.
 ansible-playbook -i inventories/production/hosts.yml site.yml --tags grafana-users
 ```
 
-## The synthetic log generator is off, and its code is still here
-
-`greener-logsample.timer` fabricated a few JSON lines per fake service every minute, purely
-to prove the chain end to end while nothing real was running. `monitoring_sample_logs_enabled`
-is now **false**, which does not just stop writing: the role stops and disables the timer
-and deletes the script, the units and the log directory.
-
-The code is deliberately **not deleted yet**. The teardown is what removes the timer from
-the host, so it has to run in every environment first — delete the tasks now and a timer
-survives on a host with nothing left to manage it. Same for the uid lists that delete the
-alert rules which depended on it. The follow-up cleanup is a one-line flag away from being
-safe, and not before.
-
 ## Running it
 
 ```bash
 make check ENV=production                                   # dry run, whole playbook
 ansible-playbook -i inventories/production/hosts.yml site.yml --tags monitoring
-ansible-playbook -i inventories/production/hosts.yml site.yml --tags logsample  # teardown only
 ```
 
 On the host:
