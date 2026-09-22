@@ -31,6 +31,15 @@ cocher l'alert contact Discord) :
 Sur le monitor `greener-api`, ajouter dans *Advanced* → **Keyword** : `reachable`, en mode
 *exists*. Sans ce mot-clé, la sonde se contente du code HTTP.
 
+> **⚠️ Mettre la méthode HTTP sur `GET`** (*Advanced* → *HTTP Method*). UptimeRobot utilise
+> **HEAD** par défaut, et l'API répond **405 Method Not Allowed** à un HEAD — sur `/health`
+> comme sur `/health/db`. Un monitor laissé en HEAD est donc rouge en permanence alors que
+> le service va parfaitement bien. Constaté en production le 22/09/2026 : quatre
+> `HEAD /health/db` d'affilée en 405 dans les logs du gateway, là où `GET` renvoie 200.
+>
+> Le mot-clé impose de toute façon `GET` : une réponse à un HEAD n'a pas de corps, donc rien
+> à chercher dedans.
+
 > **Surveiller `/health/db` et non `/health`.** `/health` répond `{"status":"ok"}` dès
 > qu'uvicorn est debout, même Postgres éteint — une sonde dessus reste verte pendant une
 > panne de base. `/health/db` répond `{"status":"ok","database":"reachable"}` et touche
@@ -80,7 +89,10 @@ silence est indétectable depuis la machine elle-même.
 ## Terminé quand
 
 - [ ] Contact d'alerte Discord créé dans UptimeRobot
-- [ ] Monitor `greener-api` actif sur `/health/db` avec le mot-clé `reachable`
+- [ ] Monitor `greener-api` actif sur `/health/db`, **méthode GET**, mot-clé `reachable`
+- [ ] Vérifié côté serveur que la sonde passe :
+      `docker logs --since 15m greener-gateway-1 | grep -i uptimerobot`
+      doit montrer des `"GET /health/db HTTP/1.1" 200`, et aucun 405
 - [ ] Monitor `greener-front` créé, **en pause** jusqu'au déploiement du front
 - [ ] Un test réel : mettre le monitor en pause/reprise, ou couper le backend une minute,
       et vérifier que le message arrive bien dans `#alerting`
