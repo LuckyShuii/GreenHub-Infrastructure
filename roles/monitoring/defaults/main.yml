@@ -17,6 +17,8 @@ monitoring_enabled: true
 monitoring_dir: /opt/greener-monitoring
 monitoring_compose_file: "{{ monitoring_dir }}/docker-compose.yml"
 monitoring_env_file: "{{ monitoring_dir }}/.env"
+# The exporter's own credentials file (see monitoring_postgres_exporter_enabled below).
+monitoring_postgres_exporter_env_file: "{{ monitoring_dir }}/postgres-exporter.env"
 monitoring_config_dir: "{{ monitoring_dir }}/config"
 monitoring_grafana_provisioning_dir: "{{ monitoring_dir }}/grafana/provisioning"
 monitoring_grafana_dashboards_dir: "{{ monitoring_dir }}/grafana/dashboards"
@@ -110,7 +112,7 @@ monitoring_prometheus_query_api: >-
 # is empty, which is the failure this catches. node_uname_info exists only if the node
 # exporter ran; `up` for the cAdvisor job only if Alloy scraped it. Each entry must return
 # at least one series or the deploy fails.
-monitoring_metrics_probes:
+monitoring_metrics_probes_base:
   - node_uname_info
   - 'up{job="integrations/cadvisor"}'
   # The probe that matters, added after the first production run paged five times for
@@ -121,6 +123,17 @@ monitoring_metrics_probes:
   - >-
     count(container_last_seen{project="{{ monitoring_app_compose_project }}"})
     >= {{ monitoring_alert_expected_containers | length }}
+
+# Each new exporter adds its own cheapest proof. Same reasoning as the cAdvisor probe: an
+# exporter that starts but never produces a series leaves Prometheus healthy and every new
+# panel empty, and the rules built on it either never fire or fire for ever. Failing the
+# DEPLOY is the only moment this is cheap to notice.
+monitoring_metrics_probes: >-
+  {{ monitoring_metrics_probes_base
+     + (monitoring_blackbox_enabled | bool
+        | ternary(['probe_ssl_earliest_cert_expiry'], []))
+     + (monitoring_postgres_exporter_enabled | bool
+        | ternary(['pg_up', 'pg_settings_max_connections'], [])) }}
 
 # --- Real log sources (SCRUM-129) --------------------------------------------------------
 # Source 1: the containers of the application compose project, read over the Docker API.
@@ -310,6 +323,190 @@ monitoring_alert_metrics_range: 600
 # turned off, the teardown deleted them from Grafana, and only then was their code removed.
 # KEEP THE SAME ORDER for anything retired later, or the rules outlive their code and go on
 # notifying with nothing in the repository to explain them.
+# --- Routing: one channel, two doors (LBT, 22/09/2026) ----------------------------------
+# Decision: everything still lands in the SAME #alerting channel. What changed is the
+# route, not the destination — a `critical` has to wake somebody up, a `warning` must not.
+#
+# Two contact points on ONE webhook, because Grafana's Discord notifier forces the choice:
+# reading receivers/discord/v1/discord.go, `UseEmbedDescription: true` sets
+# `msg.Content = ""` OUTRIGHT. Discord only raises a mention notification from `content`,
+# so a ping and an embed description are mutually exclusive per contact point — no
+# template can work around it. The embed itself (coloured title, footer) survives either
+# way, so the critical door keeps the red title and loses only the masked links.
+monitoring_alert_contact_point_critical: greener-discord-critical
+
+# Who gets woken. The numeric form, not @lucasyaisy: a Discord display name can change,
+# the id cannot. Set to "" to keep the critical route without pinging anyone.
+monitoring_alert_critical_mention: "<@238398635149099008>"
+
+# Night silence, warnings only. A `critical` is never muted — that is the whole point of
+# separating them.
+#
+# NOT A DEFERRAL, A SUPPRESSION: Alertmanager mute timings DROP notifications, they do not
+# replay them when the window ends. A warning that fires at 23:05 and resolves at 03:00 is
+# never announced; it exists only in Grafana's history. Acceptable for a warning by
+# definition — if it needed waking someone, it would be a critical.
+monitoring_alert_night_mute_enabled: true
+monitoring_alert_night_mute_name: nuit-warning
+monitoring_alert_night_mute_location: "Europe/Paris"
+# TWO ranges, and it has to be two: an Alertmanager time interval cannot cross midnight.
+# A single 23:00-08:00 entry is silently never true, which is the worst possible failure
+# mode here — it looks configured and mutes nothing.
+monitoring_alert_night_mute_ranges:
+  - {start_time: "23:00", end_time: "24:00"}
+  - {start_time: "00:00", end_time: "08:00"}
+
+# --- CPU (host) -------------------------------------------------------------------------
+# The dashboard has shown "charge par coeur" since SCRUM-99 and nothing alerted on it,
+# unlike disk and RAM. Load per core above 2 means processes are queueing for CPU on a
+# 4-vCPU host; a warning rather than a critical because high load is a symptom, and on
+# this host it is usually the AI service doing exactly what it was asked to do.
+monitoring_alert_cpu_threshold: 2
+monitoring_alert_cpu_for: 15m
+
+# --- Memory per container ---------------------------------------------------------------
+# greener-memory-high watches the MACHINE and can never say who is eating it. This one can.
+#
+# The threshold is a PERCENTAGE OF THE CONTAINER'S OWN LIMIT, read from cAdvisor
+# (container_spec_memory_limit_bytes), not a hardcoded map: the day a limit moves in
+# app_stack, the rule follows on its own with nothing to keep in sync here. That is also
+# why app_stack now sets mem_limit on every service — without a limit cAdvisor reports 0,
+# the series is filtered out below, and this rule silently covers nothing.
+monitoring_alert_container_memory_threshold: 85
+monitoring_alert_container_memory_for: 10m
+# Services whose memory saturation is a critical rather than a warning. The AI service is
+# the one consumer big enough to take the host down on its own (LBT: priority).
+monitoring_alert_memory_critical_services: [ai]
+
+# --- Disk, predictive -------------------------------------------------------------------
+# Complements greener-disk-low, does not replace it. Being told AT 85% leaves no time to
+# decide what to purge; being told "full in under 4 days at the current rate" does.
+# 6h of history so a single log burst does not extrapolate into a panic.
+monitoring_alert_disk_predict_window: 6h
+monitoring_alert_disk_predict_horizon_days: 4
+monitoring_alert_disk_predict_for: 30m
+
+# --- Blackbox probes (TLS expiry) --------------------------------------------------------
+# Runs inside Alloy like the other exporters. Caddy does NOT export certificate expiry —
+# checked, it has no such metric — so a probe is the only way to see a renewal that failed.
+# The probe leaves the host and comes back through the public name, which is the point:
+# it measures the certificate a browser is actually served.
+#
+# This is NOT a replacement for UptimeRobot (docs/uptime-externe.md): a probe running ON
+# the VPS cannot report that the VPS is down.
+monitoring_blackbox_enabled: true
+monitoring_blackbox_module: http_2xx
+monitoring_blackbox_timeout: "5s"
+monitoring_blackbox_scrape_interval: "60s"
+monitoring_blackbox_targets:
+  - name: api
+    address: "https://api.{{ caddy_domain }}/health/db"
+  - name: front
+    address: "https://greenhub.{{ caddy_domain }}"
+  - name: grafana
+    address: "{{ monitoring_grafana_root_url }}"
+
+# ACME renews at 30 days remaining. Crossing 21 therefore means a renewal has ALREADY
+# failed once — the number is a consequence, not a preference. 7 days is the point where
+# it stops being a maintenance task and starts being an outage with a date on it.
+monitoring_alert_tls_warning_days: 21
+monitoring_alert_tls_critical_days: 7
+# Long `for`: a certificate does not flap, and a single failed probe must not page.
+monitoring_alert_tls_for: 1h
+
+# --- Edge errors (Caddy access logs) -----------------------------------------------------
+# The cheapest possible stand-in for real API metrics: Caddy already logs every response
+# into the journal, which Alloy already ships. Counting 5xx there tells us the API is
+# ANSWERING BADLY — the one thing "is the container running" can never say — without
+# touching the backend repo.
+#
+# An absolute count, not a ratio. With today's traffic a ratio is noise: one request, one
+# error, 100%. Revisit once there are real users.
+monitoring_alert_edge_5xx_enabled: true
+monitoring_alert_edge_5xx_window: 5m
+monitoring_alert_edge_5xx_threshold: 10
+monitoring_alert_edge_5xx_for: 5m
+monitoring_alert_edge_5xx_range: 600
+
+# --- PostgreSQL exporter ------------------------------------------------------------------
+# ARCHITECTURE, and it reverses what docs/dashboards-et-alertes.md first recommended.
+# The exporter must reach Postgres (greener_internal) and be scraped by Alloy
+# (greener_monitoring). The "keep the networks isolated" option was to publish the
+# exporter on a host port and scrape it through the host — but a container cannot reach a
+# 127.0.0.1-published port (host-gateway resolves to the bridge address, not loopback), so
+# it would have to publish on 0.0.0.0 while the firewall role is still a stub. That trades
+# a private container-to-container link for a port open to the internet.
+#
+# So the exporter joins BOTH networks and is the single, deliberate bridge between them:
+# one container, read-only queries, no inbound path from the application side.
+monitoring_postgres_exporter_enabled: true
+monitoring_postgres_exporter_image: "quay.io/prometheuscommunity/postgres-exporter:v0.18.1"
+monitoring_postgres_exporter_port: 9187
+# The app compose project's network, as Docker names it: <project>_<network>. Follows
+# monitoring_app_compose_project, so it moves if the project directory ever moves.
+monitoring_app_network: "{{ monitoring_app_compose_project }}_greener_internal"
+
+# Mirrors roles/backend/defaults (backend_db_*). Duplicated on purpose, exactly like
+# monitoring_webhook_service above: roles/backend runs before monitoring but its defaults
+# are NOT in scope here, so a `backend_db_name | default(...)` would silently always take
+# the default and connect to the wrong database.
+monitoring_pg_host: postgres
+monitoring_pg_port: 5432
+monitoring_pg_name: greener
+monitoring_pg_user: greener
+
+# The exporter connects as the application user. KNOWN SHORTCUT: a dedicated role with
+# pg_monitor would be least-privilege, but creating it needs a DB-side task the backend
+# owns. Revisit when the backend repo manages its own migrations for roles.
+monitoring_pg_dsn_env: DATA_SOURCE_NAME
+
+monitoring_alert_pg_connections_threshold: 80
+monitoring_alert_pg_connections_for: 5m
+# The exporter going blind looks exactly like "everything is fine" on a dashboard: empty
+# panels and no alert. This is the rule that makes silence audible.
+monitoring_alert_pg_down_for: 5m
+
+# The two memory rules, built from the list above rather than written twice. A rule's
+# labels are static in Grafana, so one rule cannot carry two severities — splitting the
+# SELECTOR is the only way to say "ai is critical, the rest is a warning".
+#
+# An empty critical list renders an empty selector, and the template skips that entry
+# entirely: no rule matching nothing, and the warning rule widens to every service.
+monitoring_alert_container_memory_classes:
+  - uid: greener-memory-container-critical
+    label: Services whose memory is a critical
+    title: Mémoire conteneur saturée
+    severity: critical
+    selector: >-
+      {{ ('=~"' ~ (monitoring_alert_memory_critical_services | join('|')) ~ '"')
+         if monitoring_alert_memory_critical_services | length > 0 else '' }}
+  - uid: greener-memory-container
+    label: Every other service
+    title: Mémoire conteneur élevée
+    severity: warning
+    selector: >-
+      {{ ('!~"' ~ (monitoring_alert_memory_critical_services | join('|')) ~ '"')
+         if monitoring_alert_memory_critical_services | length > 0 else '=~".+"' }}
+
+# Two TLS rules over ONE query. The critical is a plain `lt`; the warning is a RANGE whose
+# lower bound is the critical threshold — without it both would fire under
+# monitoring_alert_tls_critical_days and the same certificate would be announced twice.
+monitoring_alert_tls_classes:
+  - uid: greener-tls-expiry-critical
+    label: TLS expiry — critical
+    title: Certificat TLS expirant
+    severity: critical
+    evaluator: lt
+    params: "[{{ monitoring_alert_tls_critical_days }}]"
+    threshold_days: "{{ monitoring_alert_tls_critical_days }} jours"
+  - uid: greener-tls-expiry-warning
+    label: TLS expiry — warning
+    title: Renouvellement TLS en retard
+    severity: warning
+    evaluator: within_range
+    params: "[{{ monitoring_alert_tls_critical_days }}, {{ monitoring_alert_tls_warning_days }}]"
+    threshold_days: "{{ monitoring_alert_tls_warning_days }} jours"
+
 monitoring_alert_container_down_uids: >-
   {{ monitoring_alert_expected_containers
      | map('regex_replace', '^', 'greener-container-down-') | list }}
@@ -317,16 +514,33 @@ monitoring_alert_unhealthy_uids: >-
   {{ monitoring_alert_healthcheck_grace.keys() | list
      | map('regex_replace', '^', 'greener-unhealthy-') | list }}
 monitoring_alert_metrics_uids: >-
-  {{ ['greener-disk-low', 'greener-memory-high', 'greener-restart-loop']
+  {{ ['greener-disk-low', 'greener-memory-high', 'greener-restart-loop',
+      'greener-cpu-high', 'greener-disk-predict',
+      'greener-memory-container', 'greener-memory-container-critical']
      + monitoring_alert_container_down_uids + monitoring_alert_unhealthy_uids }}
+# Gated on their own exporter rather than on the metrics flag: a TLS rule with no blackbox
+# probe behind it evaluates for ever on a series that will never exist.
+monitoring_alert_blackbox_uids: >-
+  {{ ['greener-tls-expiry-warning', 'greener-tls-expiry-critical'] }}
+monitoring_alert_postgres_uids: >-
+  {{ ['greener-pg-connections', 'greener-pg-down'] }}
+monitoring_alert_logs_uids: >-
+  {{ ['greener-error-rate']
+     + (monitoring_alert_edge_5xx_enabled | bool
+        | ternary(['greener-edge-5xx'], [])) }}
 # Everything this role can deploy, whatever the current flags.
 monitoring_alert_all_uids: >-
-  {{ ['greener-error-rate'] + monitoring_alert_metrics_uids }}
+  {{ ['greener-error-rate', 'greener-edge-5xx'] + monitoring_alert_metrics_uids
+     + monitoring_alert_blackbox_uids + monitoring_alert_postgres_uids }}
 # What rules.yml declares on this run.
 monitoring_alert_wanted_uids: >-
-  {{ (['greener-error-rate']
+  {{ (monitoring_alert_logs_uids
       + (monitoring_alert_metrics_rules_enabled | bool
-         | ternary(monitoring_alert_metrics_uids, [])))
+         | ternary(monitoring_alert_metrics_uids, []))
+      + (monitoring_blackbox_enabled | bool
+         | ternary(monitoring_alert_blackbox_uids, []))
+      + (monitoring_postgres_exporter_enabled | bool
+         | ternary(monitoring_alert_postgres_uids, [])))
      if monitoring_alert_rules_enabled | bool else [] }}
 # What must be deleted from Grafana on this run.
 monitoring_alert_unwanted_uids: >-

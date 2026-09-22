@@ -1,0 +1,28 @@
+# {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
+#
+# Night silence for warnings. Provisioned in its OWN file, named so it sorts before
+# policies.yml (c < m < p): Grafana walks the alerting directory in lexical order, and a
+# policy that references a mute timing Grafana has not loaded yet is rejected — leaving no
+# routing at all, which is a far worse outcome than a noisy night.
+#
+# WHAT THIS DOES, precisely: it DROPS notifications inside the window. It does not hold
+# them and release them at 08:00. A warning that fires at 23:05 and resolves at 03:00 is
+# never announced anywhere but Grafana's own history. That is an accepted consequence — a
+# thing that must wake somebody is a critical, and criticals never enter this timing.
+apiVersion: 1
+
+muteTimes:
+  - orgId: {{ monitoring_grafana_org_id }}
+    name: {{ monitoring_alert_night_mute_name }}
+    # TWO intervals for ONE night, and this is the trap worth knowing: an Alertmanager time
+    # interval CANNOT cross midnight. A single 23:00-08:00 entry is accepted, never matches,
+    # and mutes nothing — it fails by looking configured.
+    time_intervals:
+{% for range in monitoring_alert_night_mute_ranges %}
+      - times:
+          - start_time: "{{ range.start_time }}"
+            end_time: "{{ range.end_time }}"
+        # Without a location these are UTC, i.e. an hour off for half the year and silently
+        # wrong in the other half.
+        location: {{ monitoring_alert_night_mute_location }}
+{% endfor %}

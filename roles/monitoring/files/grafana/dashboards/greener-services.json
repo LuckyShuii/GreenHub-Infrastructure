@@ -2,6 +2,40 @@
   "uid": "greener-services",
   "title": "GREENER — Services",
   "description": "Ressources par service, mesurées par cAdvisor embarqué dans Alloy, et le taux d'erreurs des mêmes services lu dans Loki. Le label `service` est le nom du service compose et il est identique des deux côtés, c'est ce qui permet de mettre le CPU d'un service à côté de ses erreurs sans jointure.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "name": "Annotations & Alerts",
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "type": "dashboard"
+      },
+      {
+        "name": "Déploiements",
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "purple",
+        "target": {
+          "type": "tags",
+          "matchAny": false,
+          "tags": [
+            "deploy"
+          ],
+          "limit": 100
+        }
+      }
+    ]
+  },
   "tags": [
     "greener",
     "services",

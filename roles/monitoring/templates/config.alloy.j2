@@ -385,3 +385,56 @@ prometheus.remote_write "default" {
     url = "http://prometheus:{{ monitoring_prometheus_port }}/api/v1/write"
   }
 }
+{% if monitoring_blackbox_enabled | bool %}
+
+// --- Blackbox probes: the certificate nobody else watches ---------------------------------
+//
+// Runs inside Alloy like the other exporters, for the same reason: one agent, one set of
+// mounts, one thing to reason about.
+//
+// WHY AT ALL, given UptimeRobot already probes these URLs: UptimeRobot answers "is the
+// site up", which a probe running ON the VPS cannot honestly answer about itself. What
+// this adds is the number nobody else has — `probe_ssl_earliest_cert_expiry`. Caddy
+// exports no certificate-expiry metric, so fetching the certificate is the only way to see
+// an ACME renewal that has been failing quietly for a week.
+//
+// The probes leave the host and come back through the PUBLIC name, deliberately: that is
+// the certificate a browser is really served, chain and SNI included, rather than whatever
+// sits in Caddy's storage directory.
+prometheus.exporter.blackbox "external" {
+  // Inline YAML rather than a config_file: one module, and a second bind-mounted file for
+  // four lines would be a file to keep in sync for no benefit.
+  config = "{ modules: { {{ monitoring_blackbox_module }}: { prober: http, timeout: {{ monitoring_blackbox_timeout }} } } }"
+
+{% for target in monitoring_blackbox_targets %}
+  target {
+    name    = "{{ target.name }}"
+    address = "{{ target.address }}"
+    module  = "{{ monitoring_blackbox_module }}"
+  }
+{% endfor %}
+}
+
+// Its own scrape, at its own interval: a probe opens a real TLS connection to a real
+// endpoint, so running it every {{ monitoring_prometheus_scrape_interval }} like the local exporters would be four
+// needless handshakes a minute for a value that changes once every three months.
+prometheus.scrape "blackbox" {
+  targets         = prometheus.exporter.blackbox.external.targets
+  forward_to      = [prometheus.relabel.infra.receiver]
+  scrape_interval = "{{ monitoring_blackbox_scrape_interval }}"
+}
+{% endif %}
+{% if monitoring_postgres_exporter_enabled | bool %}
+
+// --- PostgreSQL ---------------------------------------------------------------------------
+// The exporter is a container on this network (see the compose file), so this is an
+// ordinary scrape by service name. It is the one component that also joins the
+// application network — the reasoning for that is in defaults/main.yml.
+prometheus.scrape "postgres" {
+  targets = [
+    {"__address__" = "postgres_exporter:{{ monitoring_postgres_exporter_port }}", "job" = "integrations/postgres"},
+  ]
+  forward_to      = [prometheus.relabel.infra.receiver]
+  scrape_interval = "{{ monitoring_prometheus_scrape_interval }}"
+}
+{% endif %}

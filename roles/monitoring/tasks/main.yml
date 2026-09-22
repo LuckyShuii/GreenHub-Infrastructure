@@ -119,6 +119,33 @@
   when: monitoring_alerting_enabled | bool
   notify: Restart grafana
 
+# Rendered BEFORE the policy that references it and named so it sorts first in the
+# directory (c < m < p): Grafana walks the alerting folder in lexical order and rejects a
+# policy pointing at a mute timing it has not loaded, which would leave NO routing at all.
+- name: Render the Grafana mute timings
+  ansible.builtin.template:
+    src: grafana-alerting-mutetimes.yml.j2
+    dest: "{{ monitoring_alerting_dir }}/mutetimes.yml"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0644"
+  when:
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_night_mute_enabled | bool
+  notify: Restart grafana
+
+# Turning the night silence off must REMOVE the timing, not merely stop referencing it:
+# an orphan mute timing is harmless, but leaving the file while the policy no longer names
+# it is the kind of drift that makes the next reader doubt what is actually in force.
+- name: Remove the Grafana mute timings file
+  ansible.builtin.file:
+    path: "{{ monitoring_alerting_dir }}/mutetimes.yml"
+    state: absent
+  when:
+    - monitoring_alerting_enabled | bool
+    - not (monitoring_alert_night_mute_enabled | bool)
+  notify: Restart grafana
+
 - name: Render the Grafana notification policy
   ansible.builtin.template:
     src: grafana-alerting-policies.yml.j2
@@ -228,6 +255,30 @@
     group: "{{ monitoring_group }}"
     mode: "0644"
 
+# diff:false and no_log for the same reason as the Grafana env file: this one holds the
+# database password, and a --check --diff must not print it.
+- name: Render the PostgreSQL exporter credentials
+  ansible.builtin.template:
+    src: postgres-exporter.env.j2
+    dest: "{{ monitoring_postgres_exporter_env_file }}"
+    owner: "{{ monitoring_owner }}"
+    group: "{{ monitoring_group }}"
+    mode: "0600"
+  diff: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  when:
+    - monitoring_enabled | bool
+    - monitoring_postgres_exporter_enabled | bool
+  notify: Restart postgres_exporter
+
+- name: Remove the PostgreSQL exporter credentials
+  ansible.builtin.file:
+    path: "{{ monitoring_postgres_exporter_env_file }}"
+    state: absent
+  when:
+    - monitoring_enabled | bool
+    - not (monitoring_postgres_exporter_enabled | bool)
+
 - name: Pull images and (re)start the monitoring stack
   community.docker.docker_compose_v2:
     project_src: "{{ monitoring_dir }}"
@@ -320,8 +371,13 @@
     force_basic_auth: true
     status_code: 200
   register: monitoring_contact_points
-  until: monitoring_alert_contact_point in
-         (monitoring_contact_points.json | default([]) | map(attribute='name') | list)
+  # BOTH receivers, not just the default one: the critical door is the one that pings, so
+  # a silently unparsed second contact point would look like a working channel right up to
+  # the first incident that needed to wake somebody.
+  until: >-
+    [monitoring_alert_contact_point, monitoring_alert_contact_point_critical]
+    | difference(monitoring_contact_points.json | default([])
+                 | map(attribute='name') | list) | length == 0
   retries: 6
   delay: 5
   changed_when: false
@@ -329,6 +385,29 @@
   when:
     - monitoring_enabled | bool
     - monitoring_alerting_enabled | bool
+
+# The night silence is the one piece of routing whose failure is INVISIBLE: a rejected
+# mute timing does not stop Grafana, it just means warnings keep arriving at 03:00 — and
+# nobody notices a notification that was supposed to be suppressed. Ask Grafana what it
+# loaded, like everything else here.
+- name: Verify the night mute timing is provisioned
+  ansible.builtin.uri:
+    url: "http://{{ monitoring_grafana_publish }}/api/v1/provisioning/mute-timings"
+    url_username: "{{ monitoring_grafana_admin_user }}"
+    url_password: "{{ grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: monitoring_mute_timings
+  until: monitoring_alert_night_mute_name in
+         (monitoring_mute_timings.json | default([]) | map(attribute='name') | list)
+  retries: 6
+  delay: 5
+  changed_when: false
+  no_log: "{{ hide_secrets | default(true) }}"
+  when:
+    - monitoring_enabled | bool
+    - monitoring_alerting_enabled | bool
+    - monitoring_alert_night_mute_enabled | bool
 
 # A rule Grafana refused (a malformed query model, an unknown datasource) does not stop it
 # from starting: the rule is simply absent. Ask for the list and compare against the uids

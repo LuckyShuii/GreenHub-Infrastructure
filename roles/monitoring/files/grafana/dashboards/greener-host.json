@@ -2,6 +2,40 @@
   "uid": "greener-host",
   "title": "GREENER — Machine hôte",
   "description": "Capacité et consommation du VPS, mesurées par le node exporter embarqué dans Alloy (SCRUM-99). Provisionné depuis roles/monitoring/files/grafana/dashboards — une édition dans l'UI ne survit pas à un redémarrage.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "name": "Annotations & Alerts",
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "type": "dashboard"
+      },
+      {
+        "name": "Déploiements",
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "purple",
+        "target": {
+          "type": "tags",
+          "matchAny": false,
+          "tags": [
+            "deploy"
+          ],
+          "limit": 100
+        }
+      }
+    ]
+  },
   "tags": [
     "greener",
     "host",

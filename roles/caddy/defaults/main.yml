@@ -41,3 +41,8 @@ caddy_grafana_upstream: "127.0.0.1:3000"
 # On-host config layout (the caddy package owns /etc/caddy and this Caddyfile).
 caddy_config_dir: "/etc/caddy"
 caddy_caddyfile_path: "/etc/caddy/Caddyfile"
+
+# Access logging on the application vhost, in JSON, to the journal. Feeds the
+# greener-edge-5xx alert rule in roles/monitoring — turning this off makes that rule match
+# nothing, silently, so the two move together.
+caddy_access_log: true

@@ -24,6 +24,26 @@ greenhub.{{ caddy_domain }}, api.{{ caddy_domain }} {
 	# HTTP→HTTPS redirect is automatic in Caddy; TLS is provisioned via ACME above.
 	import security_headers
 
+{% if caddy_access_log | bool %}
+	# One JSON line per response, into stdout — which under systemd IS the journal, which
+	# Alloy already ships to Loki. No new component, no new port: this is the cheapest
+	# possible answer to "is the API returning errors", a question nothing else in the
+	# stack can answer today (container-up says nothing about what it replies).
+	#
+	# `format json` is PINNED, not left to Caddy's default. Caddy picks console format on a
+	# terminal and JSON otherwise, so the default works here by accident — and the
+	# greener-edge-5xx rule parses these lines with `| json`, so the day that accident
+	# stops holding the rule matches nothing and says nothing about it.
+	#
+	# COST: one log line per request, on a host whose disk is the tightest constraint.
+	# Acceptable at today's traffic; the lever if it stops being so is
+	# monitoring_loki_retention, not turning this off.
+	log {
+		output stdout
+		format json
+	}
+{% endif %}
+
 	# Reverse-proxy to the app container over the internal network. Upstreams are resolved
 	# lazily (per request), so a missing/absent backend does NOT stop Caddy from starting
 	# or from completing its ACME challenge.

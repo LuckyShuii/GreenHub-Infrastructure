@@ -1,9 +1,15 @@
 # {{ ansible_managed }} — rendered by the app_stack role, do not edit on the host.
 # ${DB_*} is interpolated by compose from {{ app_stack_env_file }} (0600), so no secret lands here.
+#
+# Every service carries a mem_limit (see app_stack_mem_limits). Two reasons, and the
+# second one is the important one: it lets the monitoring role alert on a share of each
+# container's own limit, and it makes the kernel kill the container that actually leaks
+# instead of whichever one it finds first — which, unbounded, could be Postgres.
 services:
   gateway:
     image: {{ app_stack_gateway_image }}
     restart: unless-stopped
+    mem_limit: {{ app_stack_mem_limits.gateway }}
     depends_on:
       backend:
         condition: service_healthy
@@ -20,6 +26,7 @@ services:
   postgres:
     image: {{ app_stack_postgres_image }}
     restart: unless-stopped
+    mem_limit: {{ app_stack_mem_limits.postgres }}
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -39,6 +46,7 @@ services:
   backend:
     image: {{ app_stack_backend_image }}
     restart: unless-stopped
+    mem_limit: {{ app_stack_mem_limits.backend }}
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,6 +67,7 @@ services:
   qdrant:
     image: {{ app_stack_qdrant_image }}
     restart: unless-stopped
+    mem_limit: {{ app_stack_mem_limits.qdrant }}
     environment:
       QDRANT__SERVICE__HTTP_PORT: "{{ qdrant_port }}"
       QDRANT__LOG_LEVEL: "{{ ai_log_level }}"
@@ -79,6 +88,7 @@ services:
   ai:
     image: {{ app_stack_ai_image }}
     restart: unless-stopped
+    mem_limit: {{ app_stack_mem_limits.ai }}
     depends_on:
       qdrant:
         condition: service_healthy

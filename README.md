@@ -174,6 +174,10 @@ The bring-up ends by asking Grafana to run real queries against both datasources
 checking that the exporters actually produce series, so a broken config fails the run
 instead of leaving empty dashboards. See `roles/monitoring/README.md`.
 
+This stack cannot report its own death — it falls with the machine it watches. The probes
+that can are hosted elsewhere and configured by hand, which is why they are written down
+rather than coded: `docs/uptime-externe.md`.
+
 ## Secrets (ansible-vault)
 
 The only "vault" here is **ansible-vault** (file encryption in git). No HashiCorp Vault,

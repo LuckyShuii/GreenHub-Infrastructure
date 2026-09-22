@@ -69,3 +69,30 @@ app_stack_ai_start_period: 20m
 # playbook turns it on, so a broken image fails the deploy instead of passing silently.
 app_stack_wait: false
 app_stack_wait_timeout: 600
+
+# --- Memory limits -----------------------------------------------------------------------
+# Added for the per-container memory alert in roles/monitoring, but the limit matters more
+# than the alert. WITHOUT one, a service that leaks does not get killed — the KERNEL picks
+# a victim under pressure, and on this host the victim can just as easily be Postgres as
+# the process that actually misbehaved. A limit turns "the host degrades mysteriously" into
+# "one container died, and we know which".
+#
+# It also makes the alert possible at all: greener-memory-container reads
+# container_spec_memory_limit_bytes from cAdvisor and skips any container reporting 0, so a
+# service with no limit here is simply not covered.
+#
+# READ THESE AS A FIRST CUT, NOT AS MEASUREMENTS. ~9.75 GB committed of the host's 15 GB,
+# leaving room for the host itself and for the monitoring stack (Loki, Prometheus, Grafana,
+# Alloy). Watch "Mémoire par service" on the GREENER — Services dashboard for a week and
+# move them.
+#
+# THE FAILURE MODE TO KNOW: a limit set too low does not degrade, it OOM-kills. The
+# container then restarts, and restarts again — which greener-restart-loop catches within
+# 15 minutes. That is the intended safety net for a bad number here, not an accident.
+# `ai` is the one to watch: it loads an embedding model and indexes every region at boot.
+app_stack_mem_limits:
+  gateway: 256m
+  postgres: 2g
+  backend: 1g
+  qdrant: 1536m
+  ai: 5g

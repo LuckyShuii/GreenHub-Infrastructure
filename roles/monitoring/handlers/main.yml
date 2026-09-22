@@ -54,6 +54,19 @@
     - monitoring_enabled | bool
     - not ansible_check_mode
 
+- name: Restart postgres_exporter
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_dir }}"
+    files:
+      - docker-compose.yml
+    services:
+      - postgres_exporter
+    state: restarted
+  when:
+    - monitoring_enabled | bool
+    - monitoring_postgres_exporter_enabled | bool
+    - not ansible_check_mode
+
 - name: Reload systemd
   ansible.builtin.systemd:
     daemon_reload: true

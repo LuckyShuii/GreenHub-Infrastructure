@@ -67,6 +67,74 @@ groups:
             {{ monitoring_alert_error_window }} sur ce service
             (seuil {{ monitoring_alert_error_threshold }}).
         isPaused: false
+{% if monitoring_alert_edge_5xx_enabled | bool %}
+
+      # --- The API is answering, badly ---------------------------------------------------
+      # The closest thing to real API metrics we can have without touching the backend
+      # repo. Caddy already writes one JSON line per response into the journal, Alloy
+      # already ships it, so counting 5xx there costs one rule and no new component.
+      #
+      # `| json | status >= 500` parses the access log and filters numerically — it works
+      # only because the Caddyfile pins `format json`. A Caddy logging in console format
+      # makes this rule match nothing, silently.
+      #
+      # An absolute count, not a ratio: with today's traffic one request and one error is
+      # 100%, which would page on a single crawler hitting a dead path.
+      - uid: greener-edge-5xx
+        title: Erreurs 5xx en bordure
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_edge_5xx_range }}
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              queryType: instant
+              expr: 'sum (count_over_time({env="{{ env_name }}", service="caddy"} | json | status >= 500 [{{ monitoring_alert_edge_5xx_window }}]))'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_edge_5xx_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [{{ monitoring_alert_edge_5xx_threshold }}]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        # No 5xx at all is the normal state, so silence must not alert.
+        noDataState: OK
+        execErrState: Error
+        for: {{ monitoring_alert_edge_5xx_for }}
+        # Static: the query aggregates everything away, and `service: caddy` is what gives
+        # the Discord message its logs link — which lands on the right stream, because the
+        # 5xx really were logged by Caddy.
+        labels:
+          env: {{ env_name }}
+          service: caddy
+          severity: warning
+        annotations:
+          summary: >-
+            {% raw %}{{ printf "%.0f" $values.A.Value }}{% endraw %} réponses 5xx servies en
+            {{ monitoring_alert_edge_5xx_window }}
+            (seuil {{ monitoring_alert_edge_5xx_threshold }}).
+        isPaused: false
+{% endif %}
+
 {% if monitoring_alert_metrics_rules_enabled | bool %}
 
   # --- Metrics (SCRUM-99) ---------------------------------------------------------------
@@ -388,4 +456,393 @@ groups:
             Le conteneur {{ svc }} tourne mais échoue son healthcheck depuis {{ grace }}.
         isPaused: false
 {% endfor %}
+
+      # --- CPU -----------------------------------------------------------------------------
+      # The gap left by SCRUM-99: the host dashboard has shown load per core from day one
+      # and nothing ever alerted on it, while disk and RAM both had a rule.
+      #
+      # node_load1 divided by the number of cores, so the number means the same thing on any
+      # machine: above 1, processes are waiting for CPU; 2 is "waiting, and not briefly".
+      # scalar() and not a vector match: the core count carries none of node_load1's labels,
+      # so `/ on() ...` would need a group modifier to do what scalar does plainly.
+      - uid: greener-cpu-high
+        title: Charge CPU élevée
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: 'node_load1 / scalar(count(count by (cpu) (node_cpu_seconds_total{mode="idle"})))'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [{{ monitoring_alert_cpu_threshold }}]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: OK
+        execErrState: Alerting
+        # 15 min, longer than disk or RAM: a build, a deploy or one AI request all spike the
+        # load for a minute and none of them is an incident.
+        for: {{ monitoring_alert_cpu_for }}
+        labels:
+          env: {{ env_name }}
+          service: host
+          severity: warning
+        annotations:
+          summary: >-
+            {% raw %}Charge de {{ printf "%.2f" $values.A.Value }} par cœur{% endraw %}
+            (seuil {{ monitoring_alert_cpu_threshold }}).
+        isPaused: false
+
+      # --- Disk, before it is too late -------------------------------------------------
+      # greener-disk-low says "you are at 85%". This one says "you have three days". On a
+      # 77 GB disk sitting at 77%, the first is a fact and the second is a decision window:
+      # deciding what to purge from Loki or Prometheus is not a two-minute job.
+      #
+      # predict_linear extrapolates the last {{ monitoring_alert_disk_predict_window }} of AVAILABLE bytes
+      # {{ monitoring_alert_disk_predict_horizon_days }} days forward; below zero means the disk runs out inside that horizon.
+      # 6h of history on purpose: an hour would turn one log burst into a prophecy.
+      - uid: greener-disk-predict
+        title: Disque bientôt plein
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: 'predict_linear(node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|devtmpfs|overlay|squashfs|ramfs|fuse.*"}[{{ monitoring_alert_disk_predict_window }}], {{ monitoring_alert_disk_predict_horizon_days | int * 86400 }})'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [0]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: OK
+        execErrState: Alerting
+        # 30 min: the prediction is noisy by nature and must not page on one wobble.
+        for: {{ monitoring_alert_disk_predict_for }}
+        labels:
+          env: {{ env_name }}
+          service: host
+          severity: warning
+        # No measured value here, deliberately: the raw number is a negative byte count
+        # {{ monitoring_alert_disk_predict_horizon_days }} days out, which means nothing to a reader at 09:00.
+        annotations:
+          summary: >-
+            Au rythme des {{ monitoring_alert_disk_predict_window }} écoulées, le disque racine sera plein
+            en moins de {{ monitoring_alert_disk_predict_horizon_days }} jours.
+        isPaused: false
+{% for entry in monitoring_alert_container_memory_classes %}
+{% if entry.selector %}
+
+      # --- {{ entry.label }} ---------------------------------------------------------------
+      # greener-memory-high watches the MACHINE: it fires when the host is nearly full and
+      # cannot say who filled it. This one names the service.
+      #
+      # The threshold is a share of the container's OWN limit, read from cAdvisor rather
+      # than duplicated here — change a mem_limit in app_stack and this rule follows with
+      # nothing to keep in sync. The `> 0` on the denominator is not defensive noise: a
+      # container with no limit reports 0, and dividing by it would yield +Inf and alert
+      # for ever. Filtering it out means an unlimited container is simply NOT COVERED by
+      # this rule, which is the honest behaviour and the reason app_stack now sets a limit
+      # on every service.
+      #
+      # working_set, like the dashboard panel: `usage` includes reclaimable cache, so it
+      # would report a service as saturated while the kernel is holding cache it will drop
+      # the moment anyone needs the memory.
+      - uid: {{ entry.uid }}
+        title: {{ entry.title }}
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: >-
+                max by (service, env) (100 * container_memory_working_set_bytes{project="{{
+                monitoring_app_compose_project }}", service{{ entry.selector }}} / (container_spec_memory_limit_bytes{project="{{
+                monitoring_app_compose_project }}", service{{ entry.selector }}} > 0))
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [{{ monitoring_alert_container_memory_threshold }}]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: OK
+        execErrState: Alerting
+        for: {{ monitoring_alert_container_memory_for }}
+        # No static service label: the query returns one, and a static one would flatten
+        # every service onto a single alert instance — the same trap as greener-restart-loop.
+        labels:
+          severity: {{ entry.severity }}
+        annotations:
+          summary: >-
+            {% raw %}{{ printf "%.1f" $values.A.Value }} %{% endraw %} de sa limite mémoire
+            (seuil {{ monitoring_alert_container_memory_threshold }} %).
+        isPaused: false
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if monitoring_blackbox_enabled | bool %}
+
+  # --- Probes: the certificate nobody watches ---------------------------------------------
+  # Separate group, separate flag: these rules read series that exist only while the
+  # blackbox exporter runs. Gating them on the metrics flag would leave them evaluating
+  # against a series that is never coming back.
+  - orgId: {{ monitoring_grafana_org_id }}
+    name: greener-probes
+    folder: {{ monitoring_alert_rules_folder }}
+    interval: {{ monitoring_alert_rules_interval }}
+    rules:
+{% for pair in monitoring_alert_tls_classes %}
+      # --- {{ pair.label }} -----------------------------------------------------------------
+      # A failed ACME renewal is invisible until the day the site breaks. Caddy exports no
+      # certificate-expiry metric (checked — it has none), so the only way to see the
+      # certificate a browser is really served is to go and fetch it.
+      #
+      # WINDOWED, not `lt`: without the lower bound the warning and the critical would both
+      # fire under {{ monitoring_alert_tls_critical_days }} days and the channel would get the same incident twice.
+      - uid: {{ pair.uid }}
+        title: {{ pair.title }}
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: 'min by (instance, env) ((probe_ssl_earliest_cert_expiry - time()) / 86400)'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: {{ pair.evaluator }}
+                    params: {{ pair.params }}
+              intervalMs: 1000
+              maxDataPoints: 43200
+        # No probe result at all is an exporter problem, not a certificate problem, and it
+        # already has its own symptom elsewhere. Do not turn it into a TLS page.
+        noDataState: OK
+        execErrState: Alerting
+        # An hour: a certificate does not flap, and one failed probe must never page.
+        for: {{ monitoring_alert_tls_for }}
+        # service: caddy is not decoration — Caddy is what renews these certificates, so the
+        # logs link in the Discord message lands exactly where the ACME failure is written.
+        labels:
+          env: {{ env_name }}
+          service: caddy
+          severity: {{ pair.severity }}
+        annotations:
+          summary: >-
+            {% raw %}Le certificat de {{ $labels.instance }} expire dans
+            {{ printf "%.0f" $values.A.Value }} jours{% endraw %} (seuil {{ pair.threshold_days }}).
+        isPaused: false
+{% endfor %}
+{% endif %}
+{% if monitoring_postgres_exporter_enabled | bool %}
+
+  # --- PostgreSQL --------------------------------------------------------------------------
+  - orgId: {{ monitoring_grafana_org_id }}
+    name: greener-postgres
+    folder: {{ monitoring_alert_rules_folder }}
+    interval: {{ monitoring_alert_rules_interval }}
+    rules:
+      # --- Connection pool ---------------------------------------------------------------
+      # The most common way a healthy-looking API takes the database down: connections are
+      # opened and never returned, the container stays up, every existing query keeps
+      # working, and then nothing can connect at all. Nothing else in this stack sees it.
+      - uid: greener-pg-connections
+        title: Connexions PostgreSQL élevées
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: '100 * sum(pg_stat_database_numbackends) / scalar(max(pg_settings_max_connections))'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [{{ monitoring_alert_pg_connections_threshold }}]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: OK
+        execErrState: Alerting
+        for: {{ monitoring_alert_pg_connections_for }}
+        labels:
+          env: {{ env_name }}
+          service: postgres
+          severity: warning
+        annotations:
+          summary: >-
+            {% raw %}{{ printf "%.0f" $values.A.Value }} %{% endraw %} des connexions
+            PostgreSQL utilisées (seuil {{ monitoring_alert_pg_connections_threshold }} %).
+        isPaused: false
+
+      # --- The exporter itself -------------------------------------------------------------
+      # READ noDataState CAREFULLY — it is the opposite of every other rule in this file and
+      # that is the entire point. An exporter that dies produces NO series, the PostgreSQL
+      # dashboard goes quietly empty, and an empty dashboard looks exactly like a healthy
+      # one. `noDataState: Alerting` is what makes that silence audible.
+      #
+      # It covers two different failures with one rule: pg_up == 0 (the exporter runs but
+      # cannot reach the database) and no pg_up at all (the exporter is gone).
+      - uid: greener-pg-down
+        title: Supervision PostgreSQL indisponible
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: 'min(pg_up)'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: Alerting
+        execErrState: Alerting
+        # 5 min so a deploy, which restarts the exporter, does not announce itself.
+        for: {{ monitoring_alert_pg_down_for }}
+        labels:
+          env: {{ env_name }}
+          service: postgres
+          severity: warning
+        annotations:
+          summary: >-
+            L'exporteur PostgreSQL ne renvoie plus de métriques : le dashboard est vide,
+            pas la base forcément en panne.
+        isPaused: false
 {% endif %}
