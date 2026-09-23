@@ -768,18 +768,37 @@ exists, so a single rule with `max by (service, env)` yields one instance per se
 Its `service` label therefore comes from the query, and the rule must NOT set a static one
 — that would flatten every service onto a single alert.
 
-### `container_health_state` cannot tell "no probe" from "broken"
+### Health does not come from cAdvisor
 
-cAdvisor encodes it `1` healthy, `0` starting **or** unhealthy, `-1` no healthcheck
-declared. Two things follow, both found against production rather than reasoned about:
+`container_health_state` is **sampled once, when cAdvisor first discovers a container, and
+never refreshed.** Every container a deploy recreates is therefore pinned at "starting"
+(`0`) for the rest of Alloy's life, whatever the probe actually says. Found in production
+on 23/09/2026, five minutes after a deploy: Docker reported `qdrant`, `backend`, `postgres`
+and `ai` all `healthy` with a `FailingStreak` of 0, and the exporter reported `0` for every
+one of them — the only container reading `1` was the one already healthy when Alloy
+started. The rule fired, correctly applying its threshold to a number that was a fossil.
 
-**The gateway declares no healthcheck and this build reports it as `0`, not `-1`.** So on
-this stack a naive `== 0` rule fires for ever on a container that is perfectly fine. That
-is why `monitoring_alert_healthcheck_grace` is a **map of the services that really declare
-a probe** rather than the expected-containers list. Adding a healthcheck to a service means
-adding it here; removing one means removing it here, or its rule alerts for ever.
+So the health metric is our own. `greener-container-health.timer` runs a shell script on
+the host every `monitoring_container_health_interval`, which asks Docker directly and
+writes `container_health.prom` where the node exporter's `textfile` collector picks it up:
 
-**"Starting" also reads as `0`,** so each grace period has to outlast that service's
+```
+greener_container_health{project,service,name}    1 healthy, 0 unhealthy or starting
+greener_container_health_updated_seconds          when the file was last written
+```
+
+A container **without** a healthcheck produces no series at all, which is what retires the
+old "the gateway reads `0` and not `-1`" trap: there is nothing to confuse with a failure,
+and the threshold stays `within_range [-0.5, 0.5]`. `monitoring_alert_healthcheck_grace`
+stays a map of the services that really declare a probe — adding or removing a healthcheck
+means adding or removing it there.
+
+The rules carry `and on () (time() - greener_container_health_updated_seconds < N)`: a
+collector that stopped writing **silences** them instead of alerting on a frozen file,
+which is the exact failure being replaced. A missing metric fails the deploy instead —
+`greener_container_health` is one of `monitoring_metrics_probes`.
+
+**"Starting" still reads as `0`,** so each grace period has to outlast that service's
 `start_period` in `app_stack`. They are not uniform for a reason:
 
 | Service | `start_period` | `for` |
@@ -790,8 +809,7 @@ adding it here; removing one means removing it here, or its rule alerts for ever
 | `ai` | **20m** — it indexes every region before uvicorn answers | **25m** |
 
 A uniform five minutes would page on every single AI restart, which is the kind of rule
-people learn to ignore. The threshold is `within_range [-0.5, 0.5]` and not `lt 1`
-precisely so that `-1` is excluded: "nobody is checking" is not "it is broken".
+people learn to ignore.
 
 ### Tuning the error rate on real traffic
 
@@ -857,9 +875,9 @@ container-down alerts together mean the exporter, not the application; one dead 
 fires exactly one rule.
 
 Docker's own healthchecks (defined in `app_stack` for `backend`, `postgres`, `qdrant` and
-`ai`) are a finer signal still — a container can run while failing its probe. This cAdvisor
-version does export `container_health_state`, so the data is within reach, but no rule or
-panel uses it yet.
+`ai`) are a finer signal still — a container can run while failing its probe. That is what
+`greener-unhealthy-<service>` watches, on `greener_container_health` and **not** on
+cAdvisor's `container_health_state` (see "Health does not come from cAdvisor" above).
 
 ### Disabling them deletes them
 

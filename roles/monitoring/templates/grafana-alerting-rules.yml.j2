@@ -391,10 +391,10 @@ groups:
       # --- {{ svc }} fails its healthcheck ------------------------------------------------
       # Finer than "is it running": a container can run while failing its own probe.
       #
-      # READ THE THRESHOLD CAREFULLY. cAdvisor encodes container_health_state as 1 healthy,
-      # 0 starting OR unhealthy, -1 no healthcheck declared — so the window is centred on 0
-      # and must EXCLUDE -1, which means "nobody is checking" rather than "it is broken".
-      # Hence within_range and not a plain `lt 1`.
+      # greener_container_health is 1 healthy, 0 unhealthy or still starting, and has NO
+      # series for a container that declares no healthcheck — so nothing here can confuse
+      # "it is broken" with "nobody is checking". Written by the greener-container-health
+      # timer, NOT by cAdvisor: see the defaults for why cAdvisor cannot answer this.
       #
       # `for: {{ grace }}` is not a round number picked for comfort: "starting" also reads as 0, so
       # it has to outlast {{ svc }}'s start_period in app_stack — 20 minutes for the AI service,
@@ -415,13 +415,15 @@ groups:
                 uid: prometheus
               instant: true
               range: false
-              # Aggregated, though a single container answers: the raw series drags `id`,
-              # `image` and `name` along, and `id` changes on every recreate — each deploy
-              # would mint a brand new alert instance. It also makes a recreate err towards
-              # silence, the fresh container reading 0 while the old one still reads 1.
+              # Aggregated: `name` and the scrape labels would otherwise ride along and mint
+              # an alert instance per label set. `and on ()` drops the whole expression when
+              # the collector has stopped writing — a frozen file must silence this rule
+              # rather than page on values nobody is refreshing.
               expr: >-
-                max by (service, env) (container_health_state{project="{{
+                max by (service, env) (greener_container_health{project="{{
                 monitoring_app_compose_project }}", service="{{ svc }}"})
+                and on () (time() - greener_container_health_updated_seconds
+                < {{ monitoring_container_health_max_age }})
               intervalMs: 1000
               maxDataPoints: 43200
           - refId: B

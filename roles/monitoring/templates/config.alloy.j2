@@ -323,6 +323,13 @@ prometheus.exporter.unix "host" {
   rootfs_path = "{{ monitoring_host_rootfs_mount }}"
   procfs_path = "{{ monitoring_host_procfs_mount }}"
   sysfs_path  = "{{ monitoring_host_sysfs_mount }}"
+
+  // Container health, written on the host by the greener-container-health timer. cAdvisor
+  // exports container_health_state but samples it once per container and never refreshes
+  // it, so it reports "starting" for ever on anything a deploy recreated.
+  textfile {
+    directory = "{{ monitoring_host_rootfs_mount }}{{ monitoring_container_health_dir }}"
+  }
 }
 
 prometheus.exporter.cadvisor "containers" {

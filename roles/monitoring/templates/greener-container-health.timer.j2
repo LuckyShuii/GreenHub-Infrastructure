@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Collecte l'état de santé Docker toutes les {{ monitoring_container_health_interval }}
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec={{ monitoring_container_health_interval }}
+AccuracySec=1s
+Unit={{ monitoring_container_health_unit }}.service
+
+[Install]
+WantedBy=timers.target
