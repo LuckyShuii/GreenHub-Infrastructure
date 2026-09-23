@@ -41,6 +41,11 @@ app_stack_ai_image: "{{ app_stack_repo }}:ai-{{ app_stack_ai_tag }}"
 # provisioning run.
 app_stack_deployable_services: [backend, ai]
 
+# Ce que compose démarre avec le service ciblé (depends_on) ; sert à l'annonce de déploiement.
+app_stack_service_dependencies:
+  backend: [postgres]
+  ai: [qdrant]
+
 app_stack_gateway_image: "nginx:1.27-alpine"
 app_stack_postgres_image: "postgis/postgis:16-3.4-alpine"
 # Official image, pinned to the QDRANT_VERSION of the ai-service repo — keep them in sync.

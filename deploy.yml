@@ -40,6 +40,56 @@
           and deploy_version a commit SHA or `latest`.
         quiet: true
 
+    # Annonce "en cours" avant le pull : le canal doit montrer le début, pas seulement le
+    # résultat. Jamais bloquant — un Discord injoignable ne fait pas échouer un déploiement.
+    - name: Annoncer le déploiement sur Discord
+      ansible.builtin.uri:
+        url: "{{ discord_deploy_webhook }}"
+        method: POST
+        body_format: json
+        body:
+          embeds:
+            - title: "🚀 Déploiement en cours — {{ deploy_service }}"
+              description: >-
+                Le service `{{ deploy_service }}` passe en version `{{ deploy_version }}`
+                sur **{{ env_name }}**.
+              color: 3447003
+              fields:
+                - name: Service
+                  value: "{{ deploy_service }}"
+                  inline: true
+                - name: Version
+                  value: "`{{ deploy_version }}`"
+                  inline: true
+                - name: Environnement
+                  value: "{{ env_name }}"
+                  inline: true
+                # Le service ciblé + ce que compose démarre avec lui (depends_on).
+                - name: Services concernés
+                  value: >-
+                    {{ ([deploy_service] + (app_stack_service_dependencies[deploy_service]
+                       | default([]))) | join(', ') }}
+                  inline: false
+              footer:
+                text: "GreenHub CD"
+        status_code: [200, 204]
+        timeout: 10
+      register: deploy_discord_notice
+      failed_when: false
+      changed_when: false
+      no_log: "{{ hide_secrets | default(true) }}"
+      when: discord_deploy_webhook | default('') | length > 0
+
+    - name: Signaler une annonce Discord refusée
+      ansible.builtin.debug:
+        msg: >-
+          Discord a refusé l'annonce de déploiement (HTTP
+          {{ deploy_discord_notice.status | default('n/a') }}). Le déploiement continue ;
+          vérifier vault_discord_deploy_webhook.
+      when:
+        - discord_deploy_webhook | default('') | length > 0
+        - deploy_discord_notice.status | default(0) not in [200, 204]
+
   roles:
     # Re-rendered first so an env var added to the vault reaches the containers with the
     # same deploy, without waiting for a provisioning run.

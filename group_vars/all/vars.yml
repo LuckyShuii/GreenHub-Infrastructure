@@ -18,6 +18,8 @@ grafana_user_passwords: "{{ vault_grafana_user_passwords }}"
 # Anyone holding this URL can post in the alert channel, so it is a secret like the
 # rest: encrypted per env, rendered only into the 0600 Grafana env file.
 discord_alert_webhook: "{{ vault_discord_alert_webhook }}"
+# Canal des notifications de déploiement, à défaut celui des alertes.
+discord_deploy_webhook: "{{ vault_discord_deploy_webhook | default(vault_discord_alert_webhook | default('')) }}"
 
 # Grafana service-account token, used by deploy.yml to drop a "deploy" annotation on the
 # dashboards. `default('')` and NOT the plain indirection the others use: this one is

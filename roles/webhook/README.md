@@ -95,6 +95,14 @@ cat /opt/greener/deployed-versions.yml      # what is running right now
 is what makes a targeted redeploy safe: rolling one service re-renders the compose file with
 the tag the *other* service is recorded as running, instead of resetting it to a default.
 
+## Deploy notice
+
+Before anything is pulled, `deploy.yml` posts a blue embed to `discord_deploy_webhook`: the
+service, the version, the environment and the containers compose will touch (`backend` brings
+`postgres` with it, `ai` brings `qdrant`). The URL falls back to `discord_alert_webhook` when
+the vault has no `vault_discord_deploy_webhook`, and Discord being unreachable never fails a
+deploy — same three guards as the Grafana annotation.
+
 ## Rolling back
 
 Not automated in this version. Pin the previous tag from the control host:
