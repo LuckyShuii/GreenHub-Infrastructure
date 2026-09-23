@@ -48,9 +48,50 @@
     - "{{ monitoring_grafana_provisioning_dir }}/dashboards"
     - "{{ monitoring_alerting_dir }}"
     - "{{ monitoring_grafana_dashboards_dir }}"
+    - "{{ monitoring_container_health_dir }}"
 
 # Bind-mounted configs: compose sees no change when their content changes, so each one
 # notifies its own container explicitly.
+# Host-side, not a container: it needs the Docker API and writes where the node exporter's
+# textfile collector reads. See the defaults for why cAdvisor cannot answer this.
+- name: Install the container-health collector
+  ansible.builtin.copy:
+    src: greener-container-health.sh
+    dest: "{{ monitoring_container_health_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+    validate: "bash -n %s"
+
+- name: Install the container-health collector units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: greener-container-health.service.j2
+      dest: "{{ monitoring_container_health_unit }}.service"
+    - src: greener-container-health.timer.j2
+      dest: "{{ monitoring_container_health_unit }}.timer"
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Restart greener-container-health
+
+# The timer, not the service: the service is the oneshot it fires. A host that booted long
+# ago has OnBootSec behind it, so starting the timer collects immediately.
+- name: Enable the container-health collector timer
+  ansible.builtin.systemd:
+    name: "{{ monitoring_container_health_unit }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - monitoring_enabled | bool
+    # A dry run never writes the unit, and systemd fails on one it cannot find.
+    - not ansible_check_mode
+
 - name: Render the Loki configuration
   ansible.builtin.template:
     src: loki.yml.j2

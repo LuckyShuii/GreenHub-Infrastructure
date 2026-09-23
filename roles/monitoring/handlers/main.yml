@@ -67,6 +67,15 @@
     - monitoring_postgres_exporter_enabled | bool
     - not ansible_check_mode
 
+- name: Restart greener-container-health
+  ansible.builtin.systemd:
+    name: "{{ monitoring_container_health_unit }}.timer"
+    state: restarted
+    daemon_reload: true
+  when:
+    - monitoring_enabled | bool
+    - not ansible_check_mode
+
 - name: Reload systemd
   ansible.builtin.systemd:
     daemon_reload: true

@@ -101,6 +101,22 @@ monitoring_host_sysfs_mount: /sys
 # place inside the container needs no Alloy config at all.
 monitoring_containerd_socket: /run/containerd/containerd.sock
 
+# --- Container health ----------------------------------------------------------------------
+# NOT from cAdvisor. Its container_health_state is read ONCE, when it first discovers a
+# container, and never refreshed: every container a deploy recreates stays pinned at
+# "starting" (0) for ever, so the greener-unhealthy-* rules paged five minutes after each
+# deploy and never resolved. Verified in production (23/09/2026): every healthy container
+# read 0, and the only one reading 1 was the one already healthy when Alloy started.
+# A systemd timer writes the real status where the node exporter's textfile collector reads it.
+monitoring_container_health_script: /usr/local/bin/greener-container-health
+monitoring_container_health_dir: "{{ monitoring_dir }}/textfile"
+monitoring_container_health_file: "{{ monitoring_container_health_dir }}/container_health.prom"
+monitoring_container_health_unit: greener-container-health
+monitoring_container_health_interval: 30s
+# Four missed runs. Past that the rules stop reading the file instead of alerting on frozen
+# values — exactly the failure this collector replaces.
+monitoring_container_health_max_age: 120
+
 # Queried through Grafana's datasource proxy rather than Prometheus directly: Prometheus
 # publishes no host port (only Grafana does), so this is the one door in from the host.
 monitoring_prometheus_query_api: >-
@@ -114,6 +130,8 @@ monitoring_prometheus_query_api: >-
 # at least one series or the deploy fails.
 monitoring_metrics_probes_base:
   - node_uname_info
+  # The textfile collector: proves the health timer ran AND that Alloy reads its directory.
+  - greener_container_health
   - 'up{job="integrations/cadvisor"}'
   # The probe that matters, added after the first production run paged five times for
   # containers that were all running: `up` only proves Alloy SCRAPED cAdvisor, never that
@@ -292,21 +310,17 @@ monitoring_alert_restart_window: 15m
 monitoring_alert_restart_threshold: 3
 monitoring_alert_restart_for: 2m
 
-# Docker healthchecks, which say more than "the process exists". cAdvisor encodes
-# container_health_state as 1 healthy, 0 starting OR unhealthy, -1 no healthcheck declared.
+# Docker healthchecks, which say more than "the process exists". The source is
+# greener_container_health (1 healthy, 0 unhealthy or starting, no series without a
+# healthcheck) — see the container-health section above for why it is not cAdvisor's.
 #
-# TWO TRAPS, both verified against production rather than assumed:
-#
-# 1. The gateway declares NO healthcheck and this cAdvisor reports it as 0, not -1 — so on
-#    this build 0 cannot tell "no probe" from "failing". That is why this is a MAP of the
-#    services that really declare one, and not the expected-containers list: a rule over
-#    the gateway would fire for ever.
-# 2. "starting" is also 0, so each grace period must outlast that service's start_period in
-#    app_stack. The AI service indexes every region before answering and its start_period
-#    is 20 MINUTES, so a uniform 5 min would page on every single AI restart.
+# THE TRAP, verified against production rather than assumed: "starting" also reads as 0, so
+# each grace period must outlast that service's start_period in app_stack. The AI service
+# indexes every region before answering and its start_period is 20 MINUTES, so a uniform
+# 5 min would page on every single AI restart.
 #
 # Adding a healthcheck to a service means adding it here; removing one means removing it
-# here, or its rule alerts for ever on a -1 that never becomes 1.
+# here, or its rule sits on a metric that no longer exists.
 monitoring_alert_healthcheck_grace:
   postgres: 5m
   backend: 5m

@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Collecte l'état de santé Docker pour Prometheus
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart={{ monitoring_container_health_script }} {{ monitoring_container_health_file }}
