@@ -10,6 +10,10 @@ VAULT := inventories/$(ENV)/group_vars/all/vault.yml
 BOOTSTRAP ?=
 CONNECT := $(if $(BOOTSTRAP),-e ansible_user=ubuntu)
 
+# Extra ansible-playbook flags. make eats anything starting with -- itself, so they have to
+# come through a variable:  make deploy ENV=production ARGS="--tags backups"
+ARGS ?=
+
 .PHONY: deps lint check deploy ping vault-edit vault-rekey
 
 deps: ## Install pinned collections
@@ -20,10 +24,10 @@ lint: ## Run yamllint + ansible-lint
 	ansible-lint
 
 check: ## Dry-run against $(ENV) (no changes applied)
-	ansible-playbook -i $(INVENTORY) $(CONNECT) site.yml --check --diff
+	ansible-playbook -i $(INVENTORY) $(CONNECT) site.yml --check --diff $(ARGS)
 
 deploy: ## Apply against $(ENV)
-	ansible-playbook -i $(INVENTORY) $(CONNECT) site.yml
+	ansible-playbook -i $(INVENTORY) $(CONNECT) site.yml $(ARGS)
 
 ping: ## Connectivity check against $(ENV)
 	ansible -i $(INVENTORY) $(CONNECT) all -m ping

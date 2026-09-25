@@ -1,2 +1,7 @@
 ---
-# Handlers for the backups role (restarts/reloads — to be filled).
+# Only a daemon-reload: there is no long-running process to bounce. The timer is already
+# started by the task above, and re-reading its unit is all a changed template needs.
+- name: Reload systemd for backups
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: not ansible_check_mode

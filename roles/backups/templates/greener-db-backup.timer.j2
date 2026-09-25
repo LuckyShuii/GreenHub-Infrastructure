@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Déclenche le dump PostgreSQL ({{ backups_on_calendar }})
+
+[Timer]
+# Two triggers, whichever comes first. OnBootSec is what makes a fresh deploy produce a
+# backup immediately instead of waiting for the next slot; OnCalendar is the real cadence.
+OnBootSec={{ backups_on_boot }}
+OnCalendar={{ backups_on_calendar }}
+# A host that was down through an occurrence catches up at boot instead of waiting for the
+# next slot — the gap this closes is exactly the RPO the ticket commits to.
+Persistent={{ backups_persistent | bool | ternary('true', 'false') }}
+RandomizedDelaySec={{ backups_randomized_delay }}
+Unit={{ backups_unit }}.service
+
+[Install]
+WantedBy=timers.target

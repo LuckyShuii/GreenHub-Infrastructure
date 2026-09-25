@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Dump PostgreSQL chiffré de la base greener
+# The dump goes through `docker exec`, so the engine has to be up. Not Requires=: a stopped
+# Docker should make this run FAIL and alert, not make systemd quietly skip it.
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart={{ backups_script }} \
+    --dir {{ backups_dir }} \
+    --prefix {{ backups_file_prefix }} \
+    --project {{ backups_pg_compose_project }} \
+    --service {{ backups_pg_compose_service }} \
+    --passphrase-file {{ backups_gpg_passphrase_file }} \
+    --gnupg-home {{ backups_gnupg_home }} \
+    --state {{ backups_state_file }} \
+    --metrics {{ backups_textfile_file }} \
+    --min-size {{ backups_min_size_bytes }} \
+    --umask {{ backups_umask }}

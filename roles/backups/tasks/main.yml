@@ -1,6 +1,122 @@
 ---
-# backups role — valid stub. Real logic lands in a dedicated ticket.
-# The debug task is a no-op: stays "ok", never "changed" (idempotent).
-- name: Placeholder (no action)
-  ansible.builtin.debug:
-    msg: "Role {{ ansible_role_name }}: stub — nothing to do yet."
+# PostgreSQL dumps: gzip + GPG, on a systemd timer, reporting through the textfile collector.
+# Rotation, off-site sync and restore drills are separate tickets and deliberately absent.
+
+# Both levels, and the parent is not optional: reaching a file needs the execute bit on
+# EVERY directory along the way. Ansible created /var/backups/db-postgres as root-only when
+# it made the leaf, so the group on the leaf bought nothing — `ls` still failed for everyone
+# but root. The parent gets no setgid (no file is ever written there) and no write bit for
+# the group; it exists only to be traversed.
+- name: Create the dump directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: "{{ backups_dir_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ backups_dir | dirname }}"
+      mode: "0750"
+    - path: "{{ backups_dir }}"
+      mode: "{{ backups_dir_mode }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+# setgid only governs files created AFTER it is set. Dumps written before this role owned
+# the mode keep root:root 0644, and nothing else would ever correct them — this is the
+# replay doing it, rather than someone running chmod on the server by hand.
+- name: Normalise the mode of existing dumps
+  ansible.builtin.find:
+    paths: "{{ backups_dir }}"
+    patterns: "*.sql.gz.gpg"
+  register: backups_existing_dumps
+
+- name: Apply owner and mode to existing dumps
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: "{{ backups_dir_group }}"
+    mode: "0640"
+  loop: "{{ backups_existing_dumps.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Create the backup directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ backups_state_dir }}"
+      mode: "0700"
+    # gpg refuses to run with a world-readable home and says so in a warning nobody reads.
+    - path: "{{ backups_gnupg_home }}"
+      mode: "0700"
+    - path: "{{ backups_gpg_passphrase_file | dirname }}"
+      mode: "0755"
+    # Also created by the monitoring role. Both ensure it because the roles run in either
+    # order on a fresh host, and the first timer tick must have somewhere to write.
+    - path: "{{ backups_textfile_dir }}"
+      mode: "0755"
+  loop_control:
+    label: "{{ item.path }}"
+
+# diff: false and no_log for the same reason as the backend .env — this is the one file in
+# the role that holds a secret, and it must not surface in `--check --diff` output or in a
+# verbose failure. Debug locally with -e hide_secrets=false, never in CI.
+- name: Install the GPG passphrase
+  ansible.builtin.copy:
+    content: "{{ backup_gpg_passphrase }}\n"
+    dest: "{{ backups_gpg_passphrase_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  diff: false
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: Install the backup script
+  ansible.builtin.copy:
+    src: greener-db-backup.sh
+    dest: "{{ backups_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+    validate: "bash -n %s"
+
+- name: Install the backup units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: greener-db-backup.service.j2
+      dest: "{{ backups_unit }}.service"
+    - src: greener-db-backup.timer.j2
+      dest: "{{ backups_unit }}.timer"
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Reload systemd for backups
+
+# The timer, not the service: the service is the oneshot it fires.
+#
+# This DOES dump immediately the first time, but because of OnBootSec, NOT Persistent=.
+# Persistent= only catches up occurrences it can prove were missed, and a first install has
+# no stamp file to prove anything with — verified on the VPS, where the freshly enabled
+# timer reported LAST as empty and simply waited for the next slot. OnBootSec on a host
+# booted long ago is already behind, so starting the timer fires at once. That is wanted,
+# and it is also why this role is ordered after app_stack in site.yml: the database has to
+# be up already.
+- name: Enable the backup timer
+  ansible.builtin.systemd:
+    name: "{{ backups_unit }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - backups_enabled | bool
+    # A dry run never writes the unit, and systemd fails on one it cannot find.
+    - not ansible_check_mode
