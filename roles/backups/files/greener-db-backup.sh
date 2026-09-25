@@ -7,13 +7,6 @@
 # is shaped around, which is also why the size floor and the atomic rename exist.
 set -euo pipefail
 
-# Everything this script creates holds, or describes, the contents of the database: the dump
-# itself, the temp file it is built in, the state file. gpg --output obeys the umask like any
-# other program, and the inherited 022 left the dumps world-readable (0644) on the first
-# production run — invisible while the directory is 0700, and wrong the moment a file is
-# copied anywhere else. The one deliberate exception is the metrics file, chmod'd back to
-# 0644 below because the exporter has to read it.
-umask 077
 
 usage() {
 	echo "usage: $0 --dir DIR --prefix NAME --project NAME --service NAME \\" >&2
@@ -33,12 +26,21 @@ while [ $# -gt 0 ]; do
 		--state) state_file="$2"; shift 2 ;;
 		--metrics) metrics_file="$2"; shift 2 ;;
 		--min-size) min_size="$2"; shift 2 ;;
+		--umask) file_umask="$2"; shift 2 ;;
 		*) usage ;;
 	esac
 done
 
 : "${dest_dir:?}" "${prefix:?}" "${project:?}" "${service:?}"
 : "${passphrase_file:?}" "${gnupg_home:?}" "${state_file:?}" "${metrics_file:?}" "${min_size:?}"
+
+# Everything this script creates holds, or describes, the contents of the database: the dump,
+# the temp file it is built in, the state file. gpg --output obeys the umask like any other
+# program, and the inherited 022 left the dumps world-readable (0644) on the first production
+# run — invisible while the directory was 0700, and wrong the moment a file is copied
+# elsewhere. The one deliberate exception is the metrics file, chmod'd back to 0644 below
+# because the exporter has to read it.
+umask "${file_umask:-027}"
 
 started=$(date +%s)
 dump_file=""
@@ -103,7 +105,14 @@ if [ -z "$container" ]; then
 	exit 1
 fi
 
-install -d -m 0700 "$dest_dir"
+# NOT install -d: Ansible owns this directory, setgid bit and group included, and an
+# `install -d -m ...` here would quietly reset the mode on every run. If it is missing,
+# something is wrong upstream and saying so beats recreating it with the wrong bits.
+if [ ! -d "$dest_dir" ]; then
+	echo "backup directory ${dest_dir} does not exist" >&2
+	exit 1
+fi
+
 stamp="$(date +%Y%m%d_%H%M%S)"
 final="${dest_dir}/${prefix}_${stamp}.sql.gz.gpg"
 # Built under a name the off-site sync ignores, then renamed into place once it is

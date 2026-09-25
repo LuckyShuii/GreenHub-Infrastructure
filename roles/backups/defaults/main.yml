@@ -14,11 +14,24 @@ backups_pg_compose_project: greener
 backups_pg_compose_service: postgres
 
 # --- Where it lands ------------------------------------------------------------------------
-# 0700 root: the dumps are GPG-encrypted, but a directory listing is still a map of what
-# exists and when the backups stopped working.
 backups_dir: /var/backups/db-postgres/greener
-backups_dir_mode: "0700"
 backups_file_prefix: greener
+
+# root:greener, and the leading 2 is the point: SETGID. Without it the dumps would be
+# created by root and land in the root group no matter what the directory says, so the
+# group would be decoration. With it, every new file inherits the greener group and the
+# 027 umask below makes it 0640.
+#
+# Duplicated from the common role rather than read from it — a role must not depend on
+# another role's defaults being in scope (same rule as monitoring_app_compose_project).
+#
+# ACCEPTED: every member of the greener group, sudo or not, can now read the encrypted
+# dumps. They stay unreadable without the GPG passphrase, which remains 0600 root.
+backups_dir_group: greener
+backups_dir_mode: "2750"
+# Files 0640: owner writes, greener group reads, nobody else. The metrics file is the one
+# deliberate exception and is chmod'd back to 0644 by the script.
+backups_umask: "027"
 
 # Anything smaller than this is not a database, it is a truncated pipe. A PostGIS dump of an
 # empty schema still compresses to a few KB, so this only ever catches the real failure.

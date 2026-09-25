@@ -36,11 +36,31 @@ there for the same reason:
   copies whatever it finds in this directory, and a truncated file that reached Drive would
   look exactly like a good one.
 
-The script sets `umask 077`. `gpg --output` obeys the umask like anything else, and the
-inherited 022 left the first production dumps world-readable (0644) — harmless while the
-directory is 0700, wrong the moment a file is copied somewhere else, which is exactly what
-the off-site sync does. The metrics file is chmod'd back to 0644 explicitly, since the
-exporter has to read it.
+## Who can read a dump
+
+`/var/backups/db-postgres/greener` is **root:greener, mode 2750**, and the files inside are
+**0640**. Three pieces have to agree for that to actually hold:
+
+- the **setgid bit** (the leading `2`) — without it the dumps are created by root and land in
+  the root group whatever the directory says, so the group would be pure decoration;
+- `umask 027` in the script, since `gpg --output` obeys the umask like anything else. The
+  inherited 022 left the first production dumps world-readable (0644) — harmless while the
+  directory was 0700, wrong the moment a file is copied somewhere else, which is exactly
+  what the off-site sync will do;
+- the metrics file is chmod'd back to 0644 explicitly, because the exporter has to read it.
+
+Setgid only governs files created after it is set, so the role also normalises any dump
+written before it owned the mode. That is a task rather than a one-off `chmod` on the server
+on purpose: the repository's rule is that the replay, not a person, puts the host right.
+
+**Accepted:** every member of the `greener` group — sudo or not, which today is the whole
+team — can read the encrypted dumps. They stay useless without the GPG passphrase, which
+remains 0600 root. The parent `/var/backups/db-postgres` is not group-readable; only the
+leaf is.
+
+The script does **not** create that directory. Ansible owns it, and an `install -d -m …`
+would quietly reset the mode on every run; a missing directory is an upstream problem worth
+failing on rather than papering over.
 
 ## Encryption
 

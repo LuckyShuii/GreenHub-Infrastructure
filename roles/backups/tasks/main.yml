@@ -2,6 +2,35 @@
 # PostgreSQL dumps: gzip + GPG, on a systemd timer, reporting through the textfile collector.
 # Rotation, off-site sync and restore drills are separate tickets and deliberately absent.
 
+# root:greener and setgid, so the dumps are readable by the team without sudo. Its parent
+# stays root-only: /var/backups/db-postgres is not group-readable, only the leaf is.
+- name: Create the dump directory
+  ansible.builtin.file:
+    path: "{{ backups_dir }}"
+    state: directory
+    owner: root
+    group: "{{ backups_dir_group }}"
+    mode: "{{ backups_dir_mode }}"
+
+# setgid only governs files created AFTER it is set. Dumps written before this role owned
+# the mode keep root:root 0644, and nothing else would ever correct them — this is the
+# replay doing it, rather than someone running chmod on the server by hand.
+- name: Normalise the mode of existing dumps
+  ansible.builtin.find:
+    paths: "{{ backups_dir }}"
+    patterns: "*.sql.gz.gpg"
+  register: backups_existing_dumps
+
+- name: Apply owner and mode to existing dumps
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: "{{ backups_dir_group }}"
+    mode: "0640"
+  loop: "{{ backups_existing_dumps.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
 - name: Create the backup directories
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -10,8 +39,6 @@
     group: root
     mode: "{{ item.mode }}"
   loop:
-    - path: "{{ backups_dir }}"
-      mode: "{{ backups_dir_mode }}"
     - path: "{{ backups_state_dir }}"
       mode: "0700"
     # gpg refuses to run with a world-readable home and says so in a warning nobody reads.

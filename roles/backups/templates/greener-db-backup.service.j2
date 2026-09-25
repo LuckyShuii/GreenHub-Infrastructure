@@ -17,4 +17,5 @@ ExecStart={{ backups_script }} \
     --gnupg-home {{ backups_gnupg_home }} \
     --state {{ backups_state_file }} \
     --metrics {{ backups_textfile_file }} \
-    --min-size {{ backups_min_size_bytes }}
+    --min-size {{ backups_min_size_bytes }} \
+    --umask {{ backups_umask }}
