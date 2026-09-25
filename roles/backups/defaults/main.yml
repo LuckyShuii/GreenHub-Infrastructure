@@ -37,6 +37,12 @@ backups_umask: "027"
 # empty schema still compresses to a few KB, so this only ever catches the real failure.
 backups_min_size_bytes: 1024
 
+# --- Rotation ------------------------------------------------------------------------------
+# 7 days at one dump every 3 h is ~56 dumps kept. The rotation runs only after a dump has
+# succeeded, so a broken backup chain never erodes the history it can no longer replace.
+# The off-site copy keeps a longer window (30 days) on purpose — see the rclone role.
+backups_retention_days: 7
+
 # --- Encryption ----------------------------------------------------------------------------
 # Symmetric AES256. The passphrase is a vault_* value rendered here by Ansible; it is never
 # typed onto the host. Losing BOTH this file and the vault means losing every backup, which

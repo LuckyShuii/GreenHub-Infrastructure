@@ -43,7 +43,7 @@
   ],
   "timezone": "Europe/Paris",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "editable": false,
   "refresh": "30s",
   "time": {
@@ -828,7 +828,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 4,
         "x": 0,
         "y": 40
       },
@@ -889,8 +889,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
+        "w": 4,
+        "x": 4,
         "y": 40
       },
       "fieldConfig": {
@@ -938,8 +938,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
+        "w": 4,
+        "x": 8,
         "y": 40
       },
       "fieldConfig": {
@@ -987,8 +987,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 4,
+        "x": 20,
         "y": 40
       },
       "fieldConfig": {
@@ -1036,6 +1036,104 @@
         }
       ],
       "description": "Code de sortie du dernier passage, réussi ou non — c'est la seule valeur de cette ligne qui décrive la tentative la plus récente et non le dernier succès. 0 = tout va bien."
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Dumps conservés",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(greener_backup_files_total)"
+        }
+      ],
+      "description": "Nombre de dumps sur le disque après rotation. Doit se stabiliser autour de 56 (un dump toutes les 3 h pendant 7 jours). Une croissance continue signifie que la rotation ne tourne plus."
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Espace occupé",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "unit": "bytes",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(greener_backup_bytes_total)"
+        }
+      ],
+      "description": "Place prise par ces dumps. C'est l'alerte disque de l'hôte (greener-disk-low) qui prévient en cas de saturation ; ce chiffre dit quelle part vient des sauvegardes."
     },
     {
       "id": 22,

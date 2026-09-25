@@ -2,11 +2,11 @@
 
 **Encrypted PostgreSQL dumps, on a systemd timer, reported as Prometheus metrics.**
 
-Dumps the `greener` database every 3 hours, compresses and encrypts each dump, and writes
-four metrics where the node exporter's textfile collector picks them up. Rotation
-(SCRUM-77), off-site replication (SCRUM-78/79) and restore drills (SCRUM-80) are separate
-tickets and are deliberately not here — this role only guarantees that a good dump exists
-and that its absence is visible.
+Dumps the `greener` database every 3 hours, compresses and encrypts each dump, prunes what
+is older than the retention window, and writes six metrics where the node exporter's
+textfile collector picks them up. Off-site replication and restore drills are separate
+tickets — this role guarantees that a good dump exists, that stale ones go away, and that
+the absence of either is visible.
 
 ## The chain
 
@@ -35,6 +35,33 @@ there for the same reason:
   the size check, so a partial file never exists under the final name. The off-site sync
   copies whatever it finds in this directory, and a truncated file that reached Drive would
   look exactly like a good one.
+
+## Rotation
+
+`backups_retention_days` (7) — about 56 dumps at one every 3 hours. Two properties are worth
+more than the number itself, and both come from *where* the rotation runs rather than from
+what it does: it is the last step of the dump script, after the dump succeeded and after the
+state file recorded it.
+
+- **A run that could not produce a backup never deletes one.** A broken chain stops eroding
+  the history it can no longer replace, which is the whole point of the ticket's "la
+  conservation prime".
+- **The window can never empty the directory**, because the dump just written is zero days
+  old. No special case, no guard to get wrong — verified by ageing every file to 90 days and
+  replaying.
+
+`-mtime +7` truncates to whole days, so a file 7.9 days old reads as 7 and survives: the real
+cut-off is 8 days. That is the ticket's own wording, and it errs towards keeping.
+
+A second pass sweeps `*.partial` files older than an hour. Those are the real orphans — the
+script deletes its own on every exit path, but a SIGKILL or a power cut leaves one behind and
+nothing else would ever notice it.
+
+A rotation that fails exits non-zero **after** the success has been recorded: the staleness
+alert stays green because the backup is genuinely fine, while the exit-code alert fires,
+because a rotation that cannot run is a disk that will fill. Saturation itself is not this
+role's alert — `greener-disk-low` already watches the host disk; `greener_backup_bytes_total`
+just says how much of it is ours.
 
 ## Who can read a dump
 
@@ -108,8 +135,9 @@ dump fires during the deploy, so Postgres has to be up before the timer is enabl
 
 ## What it reports
 
-Four gauges in `db_backup.prom`. Three of them describe the last **successful** dump and are
-read back from a small state file; only the exit code describes the run that just happened:
+Six gauges in `db_backup.prom`. Three describe the last **successful** dump and are read back
+from a small state file, one describes the run that just happened, and two describe what is
+currently on disk:
 
 | Metric | Describes |
 | --- | --- |
@@ -117,6 +145,8 @@ read back from a small state file; only the exit code describes the run that jus
 | `greener_backup_last_duration_seconds` | how long it took |
 | `greener_backup_last_size_bytes` | how big it was, encrypted |
 | `greener_backup_last_exit_code` | the most recent attempt, successful or not |
+| `greener_backup_files_total` | dumps kept on disk, after rotation |
+| `greener_backup_bytes_total` | disk they take, in bytes |
 
 That split is deliberate: a failed run must report its failure **without** erasing the
 evidence of when the last good backup was — and that timestamp is the value the alert reads.

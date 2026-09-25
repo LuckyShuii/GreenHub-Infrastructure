@@ -26,6 +26,7 @@ while [ $# -gt 0 ]; do
 		--state) state_file="$2"; shift 2 ;;
 		--metrics) metrics_file="$2"; shift 2 ;;
 		--min-size) min_size="$2"; shift 2 ;;
+		--retention-days) retention_days="$2"; shift 2 ;;
 		--umask) file_umask="$2"; shift 2 ;;
 		*) usage ;;
 	esac
@@ -33,6 +34,7 @@ done
 
 : "${dest_dir:?}" "${prefix:?}" "${project:?}" "${service:?}"
 : "${passphrase_file:?}" "${gnupg_home:?}" "${state_file:?}" "${metrics_file:?}" "${min_size:?}"
+: "${retention_days:?}"
 
 # Everything this script creates holds, or describes, the contents of the database: the dump,
 # the temp file it is built in, the state file. gpg --output obeys the umask like any other
@@ -50,9 +52,25 @@ dump_file=""
 # only the exit code describes the run that just happened. That split is what lets a failed
 # run report its failure without erasing the evidence of when the last good backup was —
 # which is precisely the value the alert rule reads.
+# Counted with a glob and stat rather than `find -printf`, to stay on the same GNU-isms the
+# rest of the script already relies on.
+kept_files=0
+kept_bytes=0
+take_inventory() {
+	local f
+	kept_files=0
+	kept_bytes=0
+	for f in "$dest_dir"/*.sql.gz.gpg; do
+		[ -e "$f" ] || continue
+		kept_files=$(( kept_files + 1 ))
+		kept_bytes=$(( kept_bytes + $(stat -c %s "$f") ))
+	done
+}
+
 write_metrics() {
 	local rc="$1" tmp
 
+	take_inventory
 	if [ -f "$state_file" ]; then
 		# shellcheck disable=SC1090  # a plain KEY=value file this script wrote itself
 		. "$state_file"
@@ -72,6 +90,12 @@ write_metrics() {
 		echo '# HELP greener_backup_last_exit_code Exit code of the most recent run, successful or not. 0 is healthy.'
 		echo '# TYPE greener_backup_last_exit_code gauge'
 		echo "greener_backup_last_exit_code ${rc}"
+		echo '# HELP greener_backup_files_total Dumps currently kept on disk, after rotation.'
+		echo '# TYPE greener_backup_files_total gauge'
+		echo "greener_backup_files_total ${kept_files}"
+		echo '# HELP greener_backup_bytes_total Disk taken by those dumps, in bytes.'
+		echo '# TYPE greener_backup_bytes_total gauge'
+		echo "greener_backup_bytes_total ${kept_bytes}"
 	} >"$tmp"
 	chmod 0644 "$tmp"
 	mv "$tmp" "$metrics_file"
@@ -158,3 +182,29 @@ chmod 0600 "$tmp_state"
 mv "$tmp_state" "$state_file"
 
 echo "backup ok: ${final} (${size} bytes, ${duration}s)"
+
+# --- Rotation ------------------------------------------------------------------------------
+# Deliberately AFTER the dump succeeded and after the state file records it. Two consequences,
+# both wanted: a run that could not produce a backup never deletes an old one, and the dump
+# just written is zero days old, so the retention window can never empty the directory.
+#
+# `-mtime +N` truncates to whole days, so a file 7.9 days old reads as 7 and survives; the
+# real cut-off is 8 days. That is the ticket's own wording and it errs towards keeping.
+rotate_rc=0
+find "$dest_dir" -maxdepth 1 -type f -name "${prefix}_*.sql.gz.gpg" \
+	-mtime "+${retention_days}" -print -delete \
+	| while IFS= read -r gone; do echo "rotation: removed ${gone}"; done || rotate_rc=$?
+
+# The real orphans. The script deletes its own .partial on every exit path, but a SIGKILL or
+# a power cut leaves one behind, and nothing else would ever notice it. One hour is far longer
+# than any plausible dump.
+find "$dest_dir" -maxdepth 1 -type f -name "*.partial" -mmin +60 -print -delete \
+	| while IFS= read -r gone; do echo "rotation: removed stale ${gone}"; done || rotate_rc=$?
+
+if [ "$rotate_rc" -ne 0 ]; then
+	# The backup itself is safe and already recorded, so last_success stays fresh and the
+	# staleness alert stays green. This still exits non-zero: a rotation that cannot run is a
+	# disk that will fill, and the exit-code alert is what makes that visible.
+	echo "rotation failed (exit ${rotate_rc}) — the dump itself is fine" >&2
+	exit "$rotate_rc"
+fi
