@@ -44,10 +44,57 @@ greenhub.{{ caddy_domain }}, api.{{ caddy_domain }} {
 	}
 {% endif %}
 
+	# Static privacy policy, served by Caddy itself and never proxied.
+	#
+	# It exists because Google refuses to move an OAuth app out of "Testing" without a
+	# reachable homepage and privacy-policy URL, and an app left in Testing has its refresh
+	# token expired every 7 days — which would stop the off-site backup sync dead, silently.
+	# Hosting it here rather than on a third party keeps it on a domain we control and
+	# renew.
+	#
+	# Matched on the greenhub host only: api.<domain> belongs to the backend, and shadowing
+	# a path there would be a surprise waiting to happen.
+	#
+	# NO braces anywhere in the body: Caddy reads `{...}` inside a quoted string as a
+	# placeholder, so a <style> block would fail to parse.
+	@privacy host greenhub.{{ caddy_domain }}
+	handle @privacy {
+		handle /privacy /privacy/ {
+			header Content-Type "text/html; charset=utf-8"
+			respond `<!doctype html>
+<html lang="fr">
+<meta charset="utf-8">
+<title>GREENER — Politique de confidentialité</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<body style="max-width:42rem;margin:3rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.6">
+<h1>Politique de confidentialité</h1>
+<p>GREENER est un projet étudiant EPITECH. Cette page décrit l'usage fait de l'accès Google Drive demandé par l'application OAuth « GreenHub Backups ».</p>
+<h2>Ce que l'application fait</h2>
+<p>Elle téléverse des sauvegardes chiffrées de la base de données du projet vers le Google Drive du compte qui a donné l'autorisation. Elle n'écrit rien d'autre et ne lit aucun autre fichier.</p>
+<h2>Portée de l'accès</h2>
+<p>L'autorisation demandée est limitée au périmètre <code>drive.file</code> : l'application ne peut voir et gérer que les fichiers qu'elle a elle-même créés. Le reste du Drive lui est inaccessible.</p>
+<h2>Données concernées</h2>
+<p>Les fichiers téléversés sont des sauvegardes de base de données chiffrées (GPG, AES-256) et illisibles sans une phrase secrète qui n'est jamais transmise à Google. L'application ne collecte aucune donnée personnelle auprès des utilisateurs finaux et n'en transmet aucune à un tiers.</p>
+<h2>Conservation</h2>
+<p>Les sauvegardes sont supprimées automatiquement au bout de 30 jours.</p>
+<h2>Contact</h2>
+<p>{{ caddy_privacy_contact }}</p>
+</body>
+</html>
+` 200
+		}
+
+		handle {
+			reverse_proxy {{ caddy_backend_upstream }}
+		}
+	}
+
 	# Reverse-proxy to the app container over the internal network. Upstreams are resolved
 	# lazily (per request), so a missing/absent backend does NOT stop Caddy from starting
 	# or from completing its ACME challenge.
-	reverse_proxy {{ caddy_backend_upstream }}
+	handle {
+		reverse_proxy {{ caddy_backend_upstream }}
+	}
 
 	# Fallback: if the backend is down or not deployed yet, return a plain 200 instead of a
 	# raw 502 — the site (and its ACME-provisioned cert) still work end-to-end.

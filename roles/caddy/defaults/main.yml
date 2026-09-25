@@ -26,6 +26,11 @@ caddy_acme_staging: true
 # The app_stack gateway's published loopback port (see app_stack_gateway_publish).
 caddy_backend_upstream: "127.0.0.1:8080"
 
+# Contact shown on https://greenhub.<caddy_domain>/privacy. That page is what lets the
+# Google OAuth app leave "Testing" status, and an app stuck in Testing has its refresh token
+# expired every 7 days — the off-site backup sync would stop without saying so.
+caddy_privacy_contact: "lucas.boillot@epitech.eu"
+
 # CD deploy endpoint. The webhook daemon binds loopback only, so this vhost is the only
 # way to reach it and the only place TLS is terminated for it. Needs a DNS record for
 # deploy.<caddy_domain>, otherwise ACME cannot issue its certificate.
