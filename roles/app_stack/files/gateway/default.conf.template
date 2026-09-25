@@ -8,6 +8,13 @@ server {
 
     resolver 127.0.0.11 valid=10s ipv6=off;
 
+    # Racine: repondre 200 au lieu de laisser nginx chercher un index.html absent
+    # (la sonde blackbox `front` tape ici chaque minute, en http_2xx).
+    location = / {
+        add_header Content-Type text/plain;
+        return 200 "GREENER OK\n";
+    }
+
     # The backend owns /api: the URI is forwarded untouched (proxy_pass with a
     # variable and no URI part), so its paths are the same with or without this
     # gateway -- a dev running only the backend repo's compose hits the same URLs.
