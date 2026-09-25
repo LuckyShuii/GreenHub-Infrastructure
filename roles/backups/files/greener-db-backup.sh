@@ -7,6 +7,14 @@
 # is shaped around, which is also why the size floor and the atomic rename exist.
 set -euo pipefail
 
+# Everything this script creates holds, or describes, the contents of the database: the dump
+# itself, the temp file it is built in, the state file. gpg --output obeys the umask like any
+# other program, and the inherited 022 left the dumps world-readable (0644) on the first
+# production run — invisible while the directory is 0700, and wrong the moment a file is
+# copied anywhere else. The one deliberate exception is the metrics file, chmod'd back to
+# 0644 below because the exporter has to read it.
+umask 077
+
 usage() {
 	echo "usage: $0 --dir DIR --prefix NAME --project NAME --service NAME \\" >&2
 	echo "          --passphrase-file FILE --gnupg-home DIR --state FILE \\" >&2

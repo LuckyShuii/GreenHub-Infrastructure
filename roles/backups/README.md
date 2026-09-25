@@ -36,6 +36,12 @@ there for the same reason:
   copies whatever it finds in this directory, and a truncated file that reached Drive would
   look exactly like a good one.
 
+The script sets `umask 077`. `gpg --output` obeys the umask like anything else, and the
+inherited 022 left the first production dumps world-readable (0644) — harmless while the
+directory is 0700, wrong the moment a file is copied somewhere else, which is exactly what
+the off-site sync does. The metrics file is chmod'd back to 0644 explicitly, since the
+exporter has to read it.
+
 ## Encryption
 
 Symmetric AES256, passphrase from `backup_gpg_passphrase` (a `vault_*` value), rendered by
