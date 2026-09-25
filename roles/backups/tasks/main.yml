@@ -66,11 +66,13 @@
 
 # The timer, not the service: the service is the oneshot it fires.
 #
-# This DOES dump immediately the first time. Persistent=true means systemd keeps a stamp
-# file of the last trigger, and on a host where that file does not exist yet it assumes
-# occurrences were missed and fires at once. That is wanted — a fresh host gets a backup
-# without waiting up to three hours, and the run proves the whole chain — but it is also
-# why this role is ordered after app_stack in site.yml: the database has to be up already.
+# This DOES dump immediately the first time, but because of OnBootSec, NOT Persistent=.
+# Persistent= only catches up occurrences it can prove were missed, and a first install has
+# no stamp file to prove anything with — verified on the VPS, where the freshly enabled
+# timer reported LAST as empty and simply waited for the next slot. OnBootSec on a host
+# booted long ago is already behind, so starting the timer fires at once. That is wanted,
+# and it is also why this role is ordered after app_stack in site.yml: the database has to
+# be up already.
 - name: Enable the backup timer
   ansible.builtin.systemd:
     name: "{{ backups_unit }}.timer"

@@ -62,12 +62,18 @@ reasons, in order of how much they matter here:
    is never doubled by the next tick. With cron that needs an explicit lock.
 2. The job's output goes to journald, which Alloy already ships to Loki. A cron job would
    need its own log file, and that file would never reach Grafana.
-3. `Persistent=true` catches up an occurrence the host slept through, which is exactly the
-   gap the RPO target cares about.
+3. `OnBootSec=` fires after each boot and `Persistent=true` catches up an occurrence the
+   host slept through — together they close the gap the RPO target cares about.
 
-The role runs **after `app_stack`** in `site.yml`, out of alphabetical order: it dumps
-through `docker exec`, so enabling its timer before Postgres is up would schedule a job whose
-first run can only fail.
+`OnBootSec=` is not redundant with `Persistent=`, and the difference bit us on the first
+deploy: `Persistent=` only replays occurrences it can *prove* were missed, and a first
+install has no stamp file to prove anything with, so the timer sat idle until the next slot
+(`LAST` empty, three hours away) — no backup and, worse, no metrics at all, which drops
+`greener-backup-stale` straight into its no-data alert. On a host booted long ago
+`OnBootSec=` is already overdue, so activating the timer fires the first dump at once.
+
+The role runs **after `app_stack`** in `site.yml`, out of alphabetical order: that first
+dump fires during the deploy, so Postgres has to be up before the timer is enabled.
 
 ## What it reports
 

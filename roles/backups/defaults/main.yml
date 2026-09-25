@@ -44,6 +44,12 @@ backups_state_file: "{{ backups_state_dir }}/state"
 # up at boot instead of waiting for the next one.
 backups_on_calendar: "*-*-* 00/3:00:00"
 backups_persistent: true
+# Also fires this long after each boot. Persistent= alone does NOT cover a fresh install:
+# with no stamp file systemd has no missed occurrence to catch up on, so a newly enabled
+# timer sits idle until the next slot — up to three hours with no backup and, worse, no
+# metrics at all, which puts greener-backup-stale straight into its no-data alert. OnBootSec
+# closes both: on a host booted long ago, starting the timer triggers at once.
+backups_on_boot: 5min
 # The dump reads the whole database; starting it at the exact same second as every other
 # timer on the host is how a 3 a.m. load spike gets built.
 backups_randomized_delay: 120
