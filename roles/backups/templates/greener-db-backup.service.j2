@@ -18,4 +18,5 @@ ExecStart={{ backups_script }} \
     --state {{ backups_state_file }} \
     --metrics {{ backups_textfile_file }} \
     --min-size {{ backups_min_size_bytes }} \
+    --retention-days {{ backups_retention_days }} \
     --umask {{ backups_umask }}
