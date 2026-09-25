@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: backups
   author: GREENER infra
-  description: "Encrypted backups (restic) and restore (stub)."
+  description: "Encrypted PostgreSQL dumps on a systemd timer."
   license: MIT
   min_ansible_version: "2.15"
   platforms:

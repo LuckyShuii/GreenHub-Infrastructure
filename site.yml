@@ -11,19 +11,22 @@
       tags: [common]
 
 # app_stack runs after docker (engine) and backend (.env) — both must precede it.
+# backups is out of alphabetical order for the same kind of reason: it dumps the database
+# through `docker exec`, so enabling its timer before app_stack has brought Postgres up
+# would schedule a job whose first run can only fail.
 - name: GREENER VPS services
   hosts: greener_vps
   roles:
     - role: backend
       tags: [backend]
-    - role: backups
-      tags: [backups]
     - role: caddy
       tags: [caddy]
     - role: docker
       tags: [docker]
     - role: app_stack
       tags: [app_stack]
+    - role: backups
+      tags: [backups]
     - role: firewall
       tags: [firewall]
     - role: monitoring

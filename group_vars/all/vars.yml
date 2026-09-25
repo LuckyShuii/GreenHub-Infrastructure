@@ -13,7 +13,14 @@ common_timezone: "Europe/Paris"
 # Vault indirection: real values live per-env in inventories/<env>/.../vault.yml as vault_*.
 db_password: "{{ vault_db_password }}"
 grafana_admin_password: "{{ vault_grafana_admin_password }}"
-backup_restic_password: "{{ vault_backup_restic_password }}"
+# Symmetric GPG passphrase for the PostgreSQL dumps. Renamed from the restic placeholder
+# the skeleton shipped with: SCRUM-52 scopes secrets to ansible-vault and the dumps are
+# encrypted with gpg, so there is no restic repository and never was one.
+#
+# WARNING for the DRP: this vault is the ONLY copy. Losing the repo and the vault passphrase
+# together means every backup, local and on Drive, is unreadable — which is why SCRUM-81
+# requires a copy kept outside git.
+backup_gpg_passphrase: "{{ vault_backup_gpg_passphrase }}"
 grafana_user_passwords: "{{ vault_grafana_user_passwords }}"
 # Anyone holding this URL can post in the alert channel, so it is a secret like the
 # rest: encrypted per env, rendered only into the 0600 Grafana env file.

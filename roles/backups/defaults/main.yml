@@ -1,2 +1,56 @@
 ---
-# Default vars for the backups role (to be filled).
+# --- Master switch -------------------------------------------------------------------------
+# Same reasoning as app_stack/monitoring: the script and units are always deployed (so a
+# --check on a fresh host shows the real diff), but the timer is only started where the
+# stack it dumps actually exists.
+backups_enabled: true
+
+# --- What we dump --------------------------------------------------------------------------
+# The container is found by its compose labels, never by name: compose derives container
+# names from the project directory, so hardcoding one breaks the day /opt/greener moves.
+# The project name is duplicated from app_stack rather than read from it — a role must not
+# depend on another role's defaults being in scope (same rule as monitoring_app_compose_project).
+backups_pg_compose_project: greener
+backups_pg_compose_service: postgres
+
+# --- Where it lands ------------------------------------------------------------------------
+# 0700 root: the dumps are GPG-encrypted, but a directory listing is still a map of what
+# exists and when the backups stopped working.
+backups_dir: /var/backups/db-postgres/greener
+backups_dir_mode: "0700"
+backups_file_prefix: greener
+
+# Anything smaller than this is not a database, it is a truncated pipe. A PostGIS dump of an
+# empty schema still compresses to a few KB, so this only ever catches the real failure.
+backups_min_size_bytes: 1024
+
+# --- Encryption ----------------------------------------------------------------------------
+# Symmetric AES256. The passphrase is a vault_* value rendered here by Ansible; it is never
+# typed onto the host. Losing BOTH this file and the vault means losing every backup, which
+# is why the DRP keeps a copy outside the repo.
+backups_gpg_passphrase_file: /etc/greener/backup_gpg_pass
+# Its own GNUPGHOME: root's ~/.gnupg may not exist on a fresh host, and gpg needs somewhere
+# to keep its random state even for a symmetric encryption that uses no keyring.
+backups_gnupg_home: /var/lib/greener-backup/gnupg
+
+# --- Script, units, state ------------------------------------------------------------------
+backups_script: /usr/local/bin/greener-db-backup
+backups_unit: greener-db-backup
+backups_state_dir: /var/lib/greener-backup
+backups_state_file: "{{ backups_state_dir }}/state"
+
+# Every 3 hours on the clock (00:00, 03:00, …), so the dumps of two hosts line up and the
+# filenames are predictable. Persistent: a host that was down through an occurrence catches
+# up at boot instead of waiting for the next one.
+backups_on_calendar: "*-*-* 00/3:00:00"
+backups_persistent: true
+# The dump reads the whole database; starting it at the exact same second as every other
+# timer on the host is how a 3 a.m. load spike gets built.
+backups_randomized_delay: 120
+
+# --- Metrics -------------------------------------------------------------------------------
+# Written where the node exporter's textfile collector reads. The path is duplicated from
+# the monitoring role for the same reason as the compose project above; the two must agree,
+# and monitoring's metrics probes are what catch it if they ever stop agreeing.
+backups_textfile_dir: /opt/greener-monitoring/textfile
+backups_textfile_file: "{{ backups_textfile_dir }}/db_backup.prom"
