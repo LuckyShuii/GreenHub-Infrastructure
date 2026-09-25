@@ -49,19 +49,23 @@ greenhub.{{ caddy_domain }}, api.{{ caddy_domain }} {
 	# It exists because Google refuses to move an OAuth app out of "Testing" without a
 	# reachable homepage and privacy-policy URL, and an app left in Testing has its refresh
 	# token expired every 7 days — which would stop the off-site backup sync dead, silently.
-	# Hosting it here rather than on a third party keeps it on a domain we control and
-	# renew.
+	# Hosting it here rather than on a third party keeps it on a domain we control and renew.
 	#
-	# Matched on the greenhub host only: api.<domain> belongs to the backend, and shadowing
-	# a path there would be a surprise waiting to happen.
-	#
-	# NO braces anywhere in the body: Caddy reads `{...}` inside a quoted string as a
-	# placeholder, so a <style> block would fail to parse.
-	@privacy host greenhub.{{ caddy_domain }}
+	# A named matcher in BLOCK form, for two reasons. `handle` takes at most ONE matcher
+	# argument, so `handle /privacy /privacy/` is a parse error; and the one-line form
+	# `@name host ...` accepts a single matcher type, while this needs host AND path.
+	# The two conditions are ANDed: greenhub host only, because api.<domain> belongs to the
+	# backend and shadowing a path there is a surprise waiting to happen.
+	@privacy {
+		host greenhub.{{ caddy_domain }}
+		path /privacy /privacy/
+	}
+
+	# NO braces anywhere in the body below: Caddy reads `{...}` inside a quoted string as a
+	# placeholder, so a <style> block would fail to parse. Inline style= attributes only.
 	handle @privacy {
-		handle /privacy /privacy/ {
-			header Content-Type "text/html; charset=utf-8"
-			respond `<!doctype html>
+		header Content-Type "text/html; charset=utf-8"
+		respond `<!doctype html>
 <html lang="fr">
 <meta charset="utf-8">
 <title>GREENER — Politique de confidentialité</title>
@@ -82,16 +86,14 @@ greenhub.{{ caddy_domain }}, api.{{ caddy_domain }} {
 </body>
 </html>
 ` 200
-		}
-
-		handle {
-			reverse_proxy {{ caddy_backend_upstream }}
-		}
 	}
 
 	# Reverse-proxy to the app container over the internal network. Upstreams are resolved
 	# lazily (per request), so a missing/absent backend does NOT stop Caddy from starting
 	# or from completing its ACME challenge.
+	#
+	# Inside a `handle` so it does not ALSO answer on /privacy: a bare reverse_proxy is its
+	# own route and would match every request, named matcher or not.
 	handle {
 		reverse_proxy {{ caddy_backend_upstream }}
 	}
