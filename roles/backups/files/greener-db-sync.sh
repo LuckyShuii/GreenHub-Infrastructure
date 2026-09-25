@@ -143,5 +143,10 @@ echo "sync ok: ${transferred} uploaded, ${after} dumps off-site (${bytes} bytes,
 # Deliberately last, and deliberately age-based rather than a mirror of the local rotation.
 # 30 days off-site against 7 on disk is the whole reason `copy` is used above: a corruption
 # noticed after a fortnight is only recoverable if the two copies do not forget together.
-"${rc_bin[@]}" delete "$remote" "${include[@]}" --min-age "${retention_days}d" \
+#
+# --log-level INFO, and only here: rclone logs its "Deleted" lines at INFO, so under the
+# NOTICE default this pass removed files in complete silence — nothing in the journal, nothing
+# in Loki, no way to answer "what went and when". INFO on the copy above would log every
+# transferred file instead; on a prune that touches a handful of objects a day it is free.
+"${rc_bin[@]}" --log-level INFO delete "$remote" "${include[@]}" --min-age "${retention_days}d" \
 	|| { echo "drive retention pass failed — the upload itself is fine" >&2; exit 1; }

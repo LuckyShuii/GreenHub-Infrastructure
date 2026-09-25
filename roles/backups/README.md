@@ -84,7 +84,11 @@ The order of operations matters as much as the commands:
    hand — Drive publishes an MD5 per file. `--one-way` because the remote legitimately holds
    more than the source.
 3. Only then, the 30-day prune. **A failed integrity check never reaches it**: the script exits
-   first, so nothing is deleted off-site while the copy is unverified.
+   first, so nothing is deleted off-site while the copy is unverified. That pass runs at
+   `--log-level INFO` while everything else stays at NOTICE — rclone logs its `Deleted` lines
+   at INFO, so under the default the prune removed files in complete silence, with no way to
+   answer "what went, and when". INFO on the `copy` would log every transferred file instead;
+   on a prune touching a handful of objects a day it costs nothing.
 
 Only `*.sql.gz.gpg` is included. A `.partial` left by a dump that was killed outright must
 never reach Drive — off this host it is indistinguishable from a good file.
