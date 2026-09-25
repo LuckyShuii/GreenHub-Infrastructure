@@ -19,6 +19,11 @@ app_stack_gateway_dir: "{{ app_stack_dir }}/gateway"
 app_stack_postgres_init_dir: "{{ app_stack_dir }}/postgres-init"
 app_stack_compose_file: "{{ app_stack_dir }}/docker-compose.yml"
 
+# Compose derives both from the project directory. Needed to tell a gateway that is running
+# (its bind-mounted config must be re-read) from a host where nothing was ever brought up.
+app_stack_project_name: "{{ app_stack_dir | basename }}"
+app_stack_gateway_container: "{{ app_stack_project_name }}-gateway-1"
+
 # Private repo; backend/ai differ by tag prefix and are versioned independently by commit
 # SHA. These two are OVERRIDES: empty means "keep the tag this host is recorded as
 # running", so rolling one service never rewrites the other's pin back to a default.

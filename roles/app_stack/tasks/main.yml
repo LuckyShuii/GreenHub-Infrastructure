@@ -56,6 +56,17 @@
     - "{{ app_stack_gateway_dir }}"
     - "{{ app_stack_postgres_init_dir }}"
 
+# Gates the restart handler below: the gateway config is bind-mounted, so applying a change
+# to it means restarting a RUNNING container, which has nothing to do with app_stack_enabled
+# (the permission to pull images). On a host where the stack was never brought up there is
+# nothing to restart, and compose would fail on a service that has no container.
+- name: Check whether the gateway container exists
+  community.docker.docker_container_info:
+    name: "{{ app_stack_gateway_container }}"
+  register: app_stack_gateway_state
+  changed_when: false
+  check_mode: false
+
 - name: Deploy the internal gateway config template
   ansible.builtin.copy:
     src: gateway/default.conf.template

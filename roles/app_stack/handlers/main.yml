@@ -8,4 +8,9 @@
     services:
       - gateway
     state: restarted
-  when: app_stack_enabled | bool
+  # Not app_stack_enabled: that flag is about pulling images, and a provisioning run that
+  # rewrote this config must apply it. Skipped under --check like the monitoring handlers —
+  # the config the container would re-read was never written.
+  when:
+    - app_stack_gateway_state.exists | default(false) | bool
+    - not ansible_check_mode
