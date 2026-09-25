@@ -1,0 +1,12 @@
+# {{ ansible_managed }} — rendered from the vault, never edited on the host.
+#
+# scope = drive.file is the reason this token is survivable on an internet-facing VPS: it
+# limits the app to the files it created itself, so a stolen token cannot read, or delete,
+# anything else in the Drive. It is also why the OAuth app needed no Google verification —
+# the full `drive` scope is "restricted" and does.
+[{{ backups_rclone_remote_name }}]
+type = drive
+client_id = {{ rclone_drive_client_id }}
+client_secret = {{ rclone_drive_client_secret }}
+scope = drive.file
+token = {{ rclone_drive_token }}

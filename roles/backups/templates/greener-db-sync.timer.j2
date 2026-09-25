@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Déclenche la réplication hors-site ({{ backups_sync_on_calendar }})
+
+[Timer]
+# Offset from the dump by design, not by accident: the dump runs on the hour, this runs
+# {{ backups_sync_offset_note }} later so it copies a file that is already finished.
+#
+# The cadence matters more than it looks. If the VPS is lost, the Drive copy is the only one
+# left — so the off-site RPO is THIS interval, not the dump's. A nightly sync would quietly
+# make the DRP's 3 h RPO unreachable no matter how often the dumps run.
+OnBootSec={{ backups_sync_on_boot }}
+OnCalendar={{ backups_sync_on_calendar }}
+Persistent=true
+RandomizedDelaySec={{ backups_randomized_delay }}
+Unit={{ backups_sync_unit }}.service
+
+[Install]
+WantedBy=timers.target

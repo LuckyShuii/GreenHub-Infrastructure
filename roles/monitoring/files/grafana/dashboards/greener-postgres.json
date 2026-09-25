@@ -43,7 +43,7 @@
   ],
   "timezone": "Europe/Paris",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "editable": false,
   "refresh": "30s",
   "time": {
@@ -1144,7 +1144,7 @@
         "uid": "loki"
       },
       "gridPos": {
-        "h": 8,
+        "h": 6,
         "w": 24,
         "x": 0,
         "y": 44
@@ -1170,6 +1170,277 @@
         }
       ],
       "description": "Le journal du job, une ligne par passage. Le service n'écrit aucun fichier de log : tout sort sur stdout/stderr, part dans journald et arrive ici — d'où l'entrée greener-db-backup.service dans l'allow-list d'Alloy, sans laquelle ce panneau serait vide."
+    },
+    {
+      "id": 25,
+      "type": "row",
+      "title": "Réplication hors-site (Google Drive)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Dernière réplication",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 25200
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(greener_backup_sync_last_success_timestamp_seconds)"
+        }
+      ],
+      "description": "Âge de la dernière copie vers Drive. C'est le chiffre qui dit si les sauvegardes existent ailleurs que sur ce VPS — un dump récent avec une réplication figée signifie une seule copie, sur la machine qu'on cherche justement à pouvoir perdre."
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "Dumps hors-site",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(greener_backup_sync_remote_files)"
+        }
+      ],
+      "description": "Nombre de dumps présents sur Drive. Se stabilise plus haut qu'en local : 30 jours de rétention contre 7."
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "Espace hors-site",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "bytes",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(greener_backup_sync_remote_bytes)"
+        }
+      ],
+      "description": "Place occupée sur Drive. À surveiller si le compte approche son quota."
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "Dernier code de sortie",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(greener_backup_sync_last_exit_code)"
+        }
+      ],
+      "description": "Couvre trois pannes distinctes avec une seule valeur : transfert échoué, vérification de hash échouée, ou purge Drive échouée. Le détail est dans le journal du job."
+    },
+    {
+      "id": 30,
+      "type": "logs",
+      "title": "Ce que dit le job de réplication",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"greener-db-sync\"}"
+        }
+      ],
+      "description": "Journal du job rclone, une ligne par passage."
     }
   ]
 }

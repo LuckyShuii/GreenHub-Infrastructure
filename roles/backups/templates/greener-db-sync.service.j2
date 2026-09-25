@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Réplication des sauvegardes PostgreSQL vers Google Drive
+# Network only: unlike the dump, this touches no container.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ backups_sync_script }} \
+    --dir {{ backups_dir }} \
+    --config {{ backups_rclone_config }} \
+    --remote {{ backups_rclone_remote_name }}:{{ backups_rclone_remote_path }} \
+    --state {{ backups_sync_state_file }} \
+    --metrics {{ backups_sync_textfile_file }} \
+    --retention-days {{ backups_drive_retention_days }} \
+    --retries {{ backups_sync_retries }} \
+    --umask {{ backups_umask }}

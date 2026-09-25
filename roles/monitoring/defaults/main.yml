@@ -176,6 +176,7 @@ monitoring_journal_units:
   # The dump job: its only output is journald, so without this line the "logs associés"
   # panel of the backup row on the PostgreSQL dashboard is empty by construction.
   - greener-db-backup.service
+  - greener-db-sync.service
   - greener-webhook.service
   - docker.service
 
@@ -491,6 +492,11 @@ monitoring_alert_pg_down_for: 5m
 # slot (a reboot, a long deploy) does not page anyone.
 monitoring_alert_backup_stale_seconds: 25200
 monitoring_alert_backup_for: 10m
+
+# Same 7 h for the off-site copy, and it is arguably the more important of the two: a dump
+# that exists only on the VPS is not a backup against losing the VPS, which is the scenario
+# the whole DRP is written for. The sync runs on the same 3 h cadence, offset 20 minutes.
+monitoring_alert_backup_sync_stale_seconds: 25200
 
 # The two memory rules, built from the list above rather than written twice. A rule's
 # labels are static in Grafana, so one rule cannot carry two severities — splitting the
