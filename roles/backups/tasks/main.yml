@@ -120,3 +120,60 @@
     - backups_enabled | bool
     # A dry run never writes the unit, and systemd fails on one it cannot find.
     - not ansible_check_mode
+
+# --- Off-site replication -------------------------------------------------------------------
+
+- name: Install rclone
+  ansible.builtin.apt:
+    name: "{{ backups_rclone_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# The one secret of this half: a Google refresh token. Same treatment as the GPG passphrase
+# and the backend .env — diff: false so it never shows in --check --diff, no_log so it never
+# shows in a verbose failure.
+- name: Render the rclone configuration
+  ansible.builtin.template:
+    src: rclone.conf.j2
+    dest: "{{ backups_rclone_config }}"
+    owner: root
+    group: root
+    mode: "0600"
+  diff: false
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: Install the sync script
+  ansible.builtin.copy:
+    src: greener-db-sync.sh
+    dest: "{{ backups_sync_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+    validate: "bash -n %s"
+
+- name: Install the sync units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: greener-db-sync.service.j2
+      dest: "{{ backups_sync_unit }}.service"
+    - src: greener-db-sync.timer.j2
+      dest: "{{ backups_sync_unit }}.timer"
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Reload systemd for backups
+
+- name: Enable the sync timer
+  ansible.builtin.systemd:
+    name: "{{ backups_sync_unit }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - backups_sync_enabled | bool
+    - not ansible_check_mode

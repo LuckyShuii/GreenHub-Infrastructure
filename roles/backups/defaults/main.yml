@@ -79,3 +79,31 @@ backups_randomized_delay: 120
 # and monitoring's metrics probes are what catch it if they ever stop agreeing.
 backups_textfile_dir: /opt/greener-monitoring/textfile
 backups_textfile_file: "{{ backups_textfile_dir }}/db_backup.prom"
+
+# --- Off-site replication (rclone → Google Drive) -------------------------------------------
+backups_sync_enabled: true
+backups_sync_script: /usr/local/bin/greener-db-sync
+backups_sync_unit: greener-db-sync
+backups_sync_state_file: "{{ backups_state_dir }}/sync-state"
+backups_sync_textfile_file: "{{ backups_textfile_dir }}/db_backup_sync.prom"
+
+# rclone from APT rather than the upstream install script: the distro package is older, but
+# copy/check/delete --min-age have been stable for years, and it saves piping a remote script
+# into a shell as root on the only host we have.
+backups_rclone_packages:
+  - rclone
+backups_rclone_config: /etc/greener/rclone.conf
+backups_rclone_remote_name: gdrive
+backups_rclone_remote_path: Greener/Backups/postgres
+backups_sync_retries: 3
+
+# 30 days off-site against 7 on disk. That gap is the entire reason the sync script uses
+# `rclone copy` and never `sync`: a mirror would replay the local rotation's deletions onto
+# Drive and collapse the window back to 7 days. A corruption noticed after a fortnight is only
+# recoverable if the two copies do not forget at the same time.
+backups_drive_retention_days: 30
+
+# Every 3 hours like the dump, offset by 20 minutes so it copies a finished file.
+backups_sync_on_calendar: "*-*-* 00/3:20:00"
+backups_sync_offset_note: "20 minutes"
+backups_sync_on_boot: 10min

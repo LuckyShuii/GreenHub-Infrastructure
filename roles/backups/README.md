@@ -1,12 +1,17 @@
 # `backups` role
 
-**Encrypted PostgreSQL dumps, on a systemd timer, reported as Prometheus metrics.**
+**Encrypted PostgreSQL dumps, replicated off-site, on systemd timers, reported as Prometheus
+metrics.**
 
-Dumps the `greener` database every 3 hours, compresses and encrypts each dump, prunes what
-is older than the retention window, and writes six metrics where the node exporter's
-textfile collector picks them up. Off-site replication and restore drills are separate
-tickets — this role guarantees that a good dump exists, that stale ones go away, and that
-the absence of either is visible.
+Two jobs, two timers, one role:
+
+- **`greener-db-backup`** — dumps the `greener` database every 3 hours, compresses and
+  encrypts, prunes what is older than 7 days.
+- **`greener-db-sync`** — copies those dumps to Google Drive 20 minutes later, verifies them
+  by hash, and prunes the remote at 30 days.
+
+Both report through the node exporter's textfile collector, and both are watched by rules
+that alert on *absence* rather than only on error. Restore drills are a separate ticket.
 
 ## The chain
 
@@ -62,6 +67,51 @@ alert stays green because the backup is genuinely fine, while the exit-code aler
 because a rotation that cannot run is a disk that will fill. Saturation itself is not this
 role's alert — `greener-disk-low` already watches the host disk; `greener_backup_bytes_total`
 just says how much of it is ours.
+
+## Off-site replication
+
+`rclone copy`, **never `rclone sync`** — this is the single most important line in the sync
+script. Local retention is 7 days, the Drive window is 30; a `sync` would mirror the local
+rotation's deletions onto Drive on every run and collapse the off-site history back to 7 days,
+quietly undoing the reason for keeping a longer one. Pruning Drive is a separate, age-based
+pass at the end of the script.
+
+The order of operations matters as much as the commands:
+
+1. `copy --checksum`. Not the default size+mtime comparison: Drive rewrites modification times
+   on upload, so an mtime-based check re-uploads everything that is already there, every run.
+2. `check --one-way`. The AC's "checksum validé après transfert", done by rclone rather than by
+   hand — Drive publishes an MD5 per file. `--one-way` because the remote legitimately holds
+   more than the source.
+3. Only then, the 30-day prune. **A failed integrity check never reaches it**: the script exits
+   first, so nothing is deleted off-site while the copy is unverified.
+
+Only `*.sql.gz.gpg` is included. A `.partial` left by a dump that was killed outright must
+never reach Drive — off this host it is indistinguishable from a good file.
+
+### The token
+
+`scope = drive.file`, which is what makes a Google refresh token survivable on an
+internet-facing VPS: the app reaches only the files it created itself, so a stolen token can
+neither read nor delete anything else in that Drive. It is also why the OAuth app needed no
+Google verification — the full `drive` scope is "restricted" and does.
+
+Two things about that app are operational, not cosmetic, and both bite silently:
+
+- it must be published **In production**. Left in *Testing*, Google expires the refresh token
+  every 7 days and the sync simply stops;
+- it uses a **dedicated `client_id`**, not rclone's built-in one, which is shared between all
+  of rclone's users and heavily rate-limited.
+
+`rclone.conf` is rendered from the vault at 0600, with `diff: false` and `no_log` — same
+treatment as the GPG passphrase.
+
+### Cadence
+
+Every 3 hours, offset 20 minutes after the dump. The offset is so it copies a finished file;
+the *cadence* is the part worth defending: if the VPS is lost, the Drive copy is the only one
+left, so the off-site RPO is the sync interval, not the dump interval. A nightly sync would
+make the DRP's 3 h RPO unreachable however often the dumps ran.
 
 ## Who can read a dump
 
