@@ -53,10 +53,15 @@ Setgid only governs files created after it is set, so the role also normalises a
 written before it owned the mode. That is a task rather than a one-off `chmod` on the server
 on purpose: the repository's rule is that the replay, not a person, puts the host right.
 
+The parent `/var/backups/db-postgres` is `root:greener 0750` too, and that is not cosmetic:
+reaching a file needs the execute bit on **every** directory along the way. Left root-only —
+as it first was — the group on the leaf bought nothing and `ls` still failed for everyone but
+root. It carries no setgid (nothing is ever written there) and no group write bit; it exists
+only to be traversed.
+
 **Accepted:** every member of the `greener` group — sudo or not, which today is the whole
 team — can read the encrypted dumps. They stay useless without the GPG passphrase, which
-remains 0600 root. The parent `/var/backups/db-postgres` is not group-readable; only the
-leaf is.
+remains 0600 root.
 
 The script does **not** create that directory. Ansible owns it, and an `install -d -m …`
 would quietly reset the mode on every run; a missing directory is an upstream problem worth

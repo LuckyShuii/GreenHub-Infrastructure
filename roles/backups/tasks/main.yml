@@ -2,15 +2,25 @@
 # PostgreSQL dumps: gzip + GPG, on a systemd timer, reporting through the textfile collector.
 # Rotation, off-site sync and restore drills are separate tickets and deliberately absent.
 
-# root:greener and setgid, so the dumps are readable by the team without sudo. Its parent
-# stays root-only: /var/backups/db-postgres is not group-readable, only the leaf is.
-- name: Create the dump directory
+# Both levels, and the parent is not optional: reaching a file needs the execute bit on
+# EVERY directory along the way. Ansible created /var/backups/db-postgres as root-only when
+# it made the leaf, so the group on the leaf bought nothing — `ls` still failed for everyone
+# but root. The parent gets no setgid (no file is ever written there) and no write bit for
+# the group; it exists only to be traversed.
+- name: Create the dump directories
   ansible.builtin.file:
-    path: "{{ backups_dir }}"
+    path: "{{ item.path }}"
     state: directory
     owner: root
     group: "{{ backups_dir_group }}"
-    mode: "{{ backups_dir_mode }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ backups_dir | dirname }}"
+      mode: "0750"
+    - path: "{{ backups_dir }}"
+      mode: "{{ backups_dir_mode }}"
+  loop_control:
+    label: "{{ item.path }}"
 
 # setgid only governs files created AFTER it is set. Dumps written before this role owned
 # the mode keep root:root 0644, and nothing else would ever correct them — this is the
