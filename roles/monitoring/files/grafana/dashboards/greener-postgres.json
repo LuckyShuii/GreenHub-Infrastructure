@@ -43,7 +43,7 @@
   ],
   "timezone": "Europe/Paris",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "refresh": "30s",
   "time": {
@@ -804,6 +804,274 @@
         }
       ],
       "description": "Même source que le dashboard Logs, filtrée sur postgres : les métriques disent qu'il se passe quelque chose, les logs disent quoi."
+    },
+    {
+      "id": 17,
+      "type": "row",
+      "title": "Sauvegardes",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Dernière sauvegarde",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 25200
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(greener_backup_last_success_timestamp_seconds)"
+        }
+      ],
+      "description": "Âge du dernier dump réussi. Le seul chiffre de cette ligne qui voie le cas « le timer ne tourne plus » : un job mort ne produit aucune erreur, juste un âge qui monte. Rouge = la règle greener-backup-stale est en train de se déclencher."
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Durée du dump",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "unit": "s",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(greener_backup_last_duration_seconds)"
+        }
+      ],
+      "description": "Durée du dernier dump réussi. Une dérive lente ici est le premier signe qu'un dump finira par déborder sur le suivant."
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Taille du dump",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "unit": "bytes",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(greener_backup_last_size_bytes)"
+        }
+      ],
+      "description": "Taille du dernier dump réussi, compressé et chiffré. Une chute brutale est plus inquiétante qu'une hausse : le script refuse déjà tout fichier sous son seuil plancher, mais rien ne détecte une base à moitié vide."
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Dernier code de sortie",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(greener_backup_last_exit_code)"
+        }
+      ],
+      "description": "Code de sortie du dernier passage, réussi ou non — c'est la seule valeur de cette ligne qui décrive la tentative la plus récente et non le dernier succès. 0 = tout va bien."
+    },
+    {
+      "id": 22,
+      "type": "logs",
+      "title": "Ce que dit le job de sauvegarde",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"greener-db-backup\"}"
+        }
+      ],
+      "description": "Le journal du job, une ligne par passage. Le service n'écrit aucun fichier de log : tout sort sur stdout/stderr, part dans journald et arrive ici — d'où l'entrée greener-db-backup.service dans l'allow-list d'Alloy, sans laquelle ce panneau serait vide."
     }
   ]
 }

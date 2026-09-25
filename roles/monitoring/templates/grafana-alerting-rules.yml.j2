@@ -848,3 +848,138 @@ groups:
             pas la base forcément en panne.
         isPaused: false
 {% endif %}
+
+  # --- Backups -----------------------------------------------------------------------------
+  # Its own group, OUTSIDE the postgres-exporter guard above: these two rules read the
+  # textfile collector, not the exporter. An environment that runs no exporter still has
+  # backups, and its backups still have to be watched.
+  #
+  # service: greener-db-backup and not postgres — the label is what the Discord message
+  # turns into a logs link, and the useful logs here are the dump job's own journal, not
+  # the database container's.
+  - orgId: {{ monitoring_grafana_org_id }}
+    name: greener-backups
+    folder: {{ monitoring_alert_rules_folder }}
+    interval: {{ monitoring_alert_rules_interval }}
+    rules:
+      # --- The backup that stopped happening ----------------------------------------------
+      # THE backup alert, and deliberately not "the script exited non-zero". A script only
+      # reports a failure when it runs; the failure that actually loses a database is the
+      # timer that quietly stopped firing — no error, no log line, nothing to alert on — and
+      # nobody notices until a restore is needed. The age of the last success is the only
+      # signal that covers both.
+      #
+      # noDataState: Alerting, same reasoning as greener-pg-down. No series at all means the
+      # script never wrote its file or the node exporter stopped reading the directory; in
+      # both cases nobody can say when the last backup was, which is exactly the silence
+      # this rule exists to break.
+      - uid: greener-backup-stale
+        title: Sauvegarde PostgreSQL trop ancienne
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              # A host that has never produced a backup leaves the gauge at 0, so this reads
+              # as an age of decades and fires — which is the right answer for that host.
+              expr: 'time() - max(greener_backup_last_success_timestamp_seconds)'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [{{ monitoring_alert_backup_stale_seconds }}]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: Alerting
+        execErrState: Alerting
+        for: {{ monitoring_alert_backup_for }}
+        labels:
+          env: {{ env_name }}
+          service: greener-db-backup
+          severity: critical
+        annotations:
+          summary: >-
+            Dernière sauvegarde réussie il y a
+            {% raw %}{{ printf "%.1f" (div $values.A.Value 3600.0) }}{% endraw %} h
+            (seuil {{ (monitoring_alert_backup_stale_seconds / 3600) | round(1) }} h).
+        isPaused: false
+
+      # --- The backup that ran and failed -------------------------------------------------
+      # Separate from the staleness rule, and it fires FIRST: a run that exits non-zero is
+      # known within minutes, where staleness needs hours to build up. Together they cover
+      # the two halves — it broke, versus it never ran.
+      #
+      # noDataState: OK here, unlike the rule above: absence is already that rule's job, and
+      # duplicating it would mean two pages for one incident.
+      - uid: greener-backup-failed
+        title: Échec de la sauvegarde PostgreSQL
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              instant: true
+              range: false
+              expr: 'max(greener_backup_last_exit_code)'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: {{ monitoring_alert_metrics_range }}
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              intervalMs: 1000
+              maxDataPoints: 43200
+        noDataState: OK
+        execErrState: Alerting
+        for: {{ monitoring_alert_backup_for }}
+        labels:
+          env: {{ env_name }}
+          service: greener-db-backup
+          severity: critical
+        annotations:
+          summary: >-
+            Le dernier dump PostgreSQL s'est terminé en erreur (code
+            {% raw %}{{ printf "%.0f" $values.A.Value }}{% endraw %}) :
+            journalctl -u greener-db-backup.
+        isPaused: false

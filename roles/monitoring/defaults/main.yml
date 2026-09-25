@@ -173,6 +173,9 @@ monitoring_docker_refresh_interval: "15s"
 # the journal is sshd refusing internet scans. Adding a unit here is a one-line change.
 monitoring_journal_units:
   - caddy.service
+  # The dump job: its only output is journald, so without this line the "logs associés"
+  # panel of the backup row on the PostgreSQL dashboard is empty by construction.
+  - greener-db-backup.service
   - greener-webhook.service
   - docker.service
 
@@ -479,6 +482,15 @@ monitoring_alert_pg_connections_for: 5m
 # The exporter going blind looks exactly like "everything is fine" on a dashboard: empty
 # panels and no alert. This is the rule that makes silence audible.
 monitoring_alert_pg_down_for: 5m
+
+# --- Backups -------------------------------------------------------------------------------
+# The staleness threshold is the REAL backup alert, and it is deliberately not "the script
+# exited non-zero". A script only reports a failure when it runs; the failure nobody ever
+# catches is the timer that stopped firing, and the only thing that sees it is the age of
+# the last success. 7 h = two missed occurrences of a 3-hourly dump, so a single skipped
+# slot (a reboot, a long deploy) does not page anyone.
+monitoring_alert_backup_stale_seconds: 25200
+monitoring_alert_backup_for: 10m
 
 # The two memory rules, built from the list above rather than written twice. A rule's
 # labels are static in Grafana, so one rule cannot carry two severities — splitting the
