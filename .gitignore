@@ -15,3 +15,5 @@ vault_pass
 collections/
 
 .claude
+# Local Python env
+.venv/
