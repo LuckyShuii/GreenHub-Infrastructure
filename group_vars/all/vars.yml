@@ -87,8 +87,10 @@ ai_port: 8443
 ai_device: "cpu"
 # Relative to the image WORKDIR (/greener); the region JSON files ship in the image.
 ai_data_dir: "./data"
-# Downloaded reference images are never re-read by the code, only written: off in prod.
-ai_save_images: false
+# Reference-image dataset, one sub-directory per label. Relative to the WORKDIR too, but
+# unlike data/ it does NOT ship in the image: it is bind-mounted from the host and refreshed
+# by hand (see app_stack_ai_images_dir).
+ai_image_dir: "./image_dir"
 ai_log_level: "INFO"
 
 # Qdrant vector store, internal to the compose stack (service name = hostname).
