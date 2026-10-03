@@ -1,5 +1,7 @@
 ---
-# Shared project group and its collaborative directory.
+# Shared project group and its collaborative directory. greener_group is also set at
+# playbook level (group_vars/all/vars.yml), which is what other roles read; this stays the
+# role-local fallback, like common_timezone below.
 greener_group: greener
 greener_shared_dir: /srv/greener
 

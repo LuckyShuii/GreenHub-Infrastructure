@@ -119,7 +119,7 @@ services:
     environment:
       AI_HOST: 0.0.0.0
       AI_PORT: "8443"
-      EMBEDDING_MODEL_NAME: facebook/dinov2-small
+      EMBEDDING_MODEL_NAME: facebook/dinov2-large
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
       DEVICE: cpu

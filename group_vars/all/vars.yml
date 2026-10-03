@@ -5,6 +5,11 @@
 
 common_timezone: "Europe/Paris"
 
+# Project group. Defined here and not only in the common role's defaults because two roles
+# need it: common creates it, app_stack chgrps the AI dataset directory to it — and a role
+# never sees another role's defaults.
+greener_group: greener
+
 # No ansible_user on purpose: with remote_user unset Ansible lets the SSH client pick the
 # account, so each operator connects with their own nominative users.yml account via their
 # ~/.ssh/config and sudo stays traceable per person. Fresh VPS, before `common` has created
@@ -81,7 +86,11 @@ grafana_public: true
 # AI service: names/values mirror the ai-service repo (.env.example + configs.py).
 # The old AI_PIPELINE_MODEL_NAME (image-classification pipeline) is gone: the service now
 # embeds images and searches a Qdrant vector store.
-ai_embedding_model: "facebook/dinov2-small"
+# dinov2-large: 1024 dimensions and ~1.2 GB of weights, where -small had 384.
+# WARNING, the vector size is part of a qdrant collection's schema and ensure_collection
+# leaves an existing collection alone: changing this model REQUIRES wiping qdrant_storage,
+# or every scan queries a 384-wide collection with a 1024-wide vector and 500s.
+ai_embedding_model: "facebook/dinov2-large"
 ai_host: "0.0.0.0"
 ai_port: 8443
 ai_device: "cpu"
@@ -91,8 +100,15 @@ ai_data_dir: "./data"
 # unlike data/ it does NOT ship in the image: it is bind-mounted from the host and refreshed
 # by hand (see app_stack_ai_image_dir).
 ai_image_dir: "./image_dir"
+# Reference images indexed per item, and how many are read in parallel.
+ai_images_per_label: 3
+ai_max_concurrent_uploads: 10
 ai_log_level: "INFO"
 
 # Qdrant vector store, internal to the compose stack (service name = hostname).
+# The AI repo's .env.example says 0.0.0.0: that is the bind address of THEIR compose, not an
+# address another container can reach. Here it is the service name.
 qdrant_host: "qdrant"
 qdrant_port: 6333
+# qdrant's own verbosity, distinct from the AI service's.
+qdrant_log_level: "INFO"

@@ -70,7 +70,7 @@ services:
     mem_limit: {{ app_stack_mem_limits.qdrant }}
     environment:
       QDRANT__SERVICE__HTTP_PORT: "{{ qdrant_port }}"
-      QDRANT__LOG_LEVEL: "{{ ai_log_level }}"
+      QDRANT__LOG_LEVEL: "{{ qdrant_log_level }}"
     expose:
       - "{{ qdrant_port }}"
     volumes:

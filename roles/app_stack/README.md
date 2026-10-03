@@ -117,7 +117,7 @@ not stop the gateway from booting (same resilience as the Caddyfile fallback).
 
 ## AI service and qdrant
 
-The AI service embeds the uploaded photo (`facebook/dinov2-small`) and searches a **Qdrant**
+The AI service embeds the uploaded photo (`facebook/dinov2-large`) and searches a **Qdrant**
 collection per region, so qdrant is a hard dependency, not an option.
 
 At **startup** it discovers the region JSON files in `DATA_DIR`, then for every item it does
