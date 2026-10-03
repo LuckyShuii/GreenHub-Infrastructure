@@ -47,10 +47,14 @@ webhook_deploy_script: /usr/local/bin/greener-deploy
 webhook_lock_file: /var/lock/greener-deploy.lock
 webhook_lock_timeout: 900
 
-# Hook id -> compose service. The ids come from the QA<->infra contract, which says
-# deploy-ia where the compose service is named ai.
+# Hook id -> compose service. The id is `deploy-<service>` and the service is the compose
+# one, so the whole chain spells the AI service the same way: the image tag prefix (ai-*),
+# the compose service, app_stack_ai_*, and the DEPLOY_SERVICE of both CI workflows. The
+# QA<->infra contract first wrote `deploy-ia`; it was never called successfully (the AI build
+# failed before reaching its deploy job), and the CI that finally reached it asked for
+# deploy-ai and got a 404.
 webhook_deploy_hooks:
   - id: deploy-backend
     service: backend
-  - id: deploy-ia
+  - id: deploy-ai
     service: ai

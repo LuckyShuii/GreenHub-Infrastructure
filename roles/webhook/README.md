@@ -23,7 +23,7 @@ GitHub Actions ──POST /hooks/deploy-<service>──▶ Caddy (443, TLS)
 
 | | |
 |---|---|
-| Endpoint | `POST https://deploy.<domain>/hooks/deploy-backend` \| `/hooks/deploy-ia` |
+| Endpoint | `POST https://deploy.<domain>/hooks/deploy-backend` \| `/hooks/deploy-ai` |
 | Auth | header `X-Deploy-Token`, the value the pipeline holds as its `VPS_DEPLOY_KEY` repo secret |
 | Body | `{"version": "<commit sha>"}` or `{"version": "latest"}`, `Content-Type: application/json` |
 | Refused | `403`, and **nothing is executed** (`trigger-rule-mismatch-http-response-code`) |
