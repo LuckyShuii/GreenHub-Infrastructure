@@ -68,10 +68,12 @@ app_stack_ai_models_volume: ai_models
 # it out of reach of a plain `scp`. Group-writable by greener + setgid so an admin can upload
 # over the VPN without root and the uploaded files keep the group; the container mounts it
 # read-only.
-app_stack_ai_images_dir: "{{ app_stack_dir }}/ai-images"
+# Same basename as IMAGE_DIR on purpose: host path and container path read alike, and the
+# dataset that is already on the VPS stays where it is.
+app_stack_ai_image_dir: "{{ app_stack_dir }}/image_dir"
 # Where that mount lands in the container: IMAGE_DIR (ai_image_dir, "./image_dir") resolved
 # against the AI image's WORKDIR /greener. Keep the two in sync.
-app_stack_ai_images_mount: "/greener/image_dir"
+app_stack_ai_image_mount: "/greener/image_dir"
 # Holds the indexed vectors: without it every restart re-downloads and re-embeds the
 # reference images of all 114 items (many minutes, and the API does not answer meanwhile).
 app_stack_qdrant_storage_volume: qdrant_storage

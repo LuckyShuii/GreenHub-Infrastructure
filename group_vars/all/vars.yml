@@ -89,7 +89,7 @@ ai_device: "cpu"
 ai_data_dir: "./data"
 # Reference-image dataset, one sub-directory per label. Relative to the WORKDIR too, but
 # unlike data/ it does NOT ship in the image: it is bind-mounted from the host and refreshed
-# by hand (see app_stack_ai_images_dir).
+# by hand (see app_stack_ai_image_dir).
 ai_image_dir: "./image_dir"
 ai_log_level: "INFO"
 

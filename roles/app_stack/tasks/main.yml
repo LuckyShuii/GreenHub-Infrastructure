@@ -60,7 +60,7 @@
 # greener group and the setgid bit rather than the deploy-only 0755 of the rendered artifacts.
 - name: Ensure the AI dataset directory exists
   ansible.builtin.file:
-    path: "{{ app_stack_ai_images_dir }}"
+    path: "{{ app_stack_ai_image_dir }}"
     state: directory
     owner: "{{ app_stack_owner }}"
     group: "{{ greener_group }}"

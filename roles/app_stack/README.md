@@ -19,14 +19,14 @@ WAN → Caddy (host, 80/443, TLS) → gateway (nginx, 127.0.0.1:8080) → backen
 2. Ships the gateway config to `/opt/greener/gateway/default.conf.template` (rendered by the
    nginx image's `envsubst` from `BACKEND_UPSTREAM` / `AI_UPSTREAM`) and the postgres init
    scripts to `/opt/greener/postgres-init/`.
-3. Creates `/opt/greener/ai-images/`, the AI reference-image dataset (see below) — the only
+3. Creates `/opt/greener/image_dir/`, the AI reference-image dataset (see below) — the only
    artifact here that is NOT rendered by Ansible: its content is uploaded by hand.
 4. Pulls images and brings the stack up (`community.docker.docker_compose_v2`).
 
 Everything under `/opt/greener` is owned by `deploy`, the non-human CD account: that is what
 lets the recurring deploy re-render these files locally without root. The modes stay
 world-readable because the bind mounts are read by container uids, not by `deploy`. The one
-exception is `ai-images/`, group `greener` and group-writable — it is fed by a human, not by a
+exception is `image_dir/`, group `greener` and group-writable — it is fed by a human, not by a
 deploy (see below).
 
 DB credentials are never written into the compose file: `${DB_USER/DB_PASSWORD/DB_NAME}` are
@@ -132,12 +132,12 @@ healthcheck. Once the volume is warm, indexing is skipped item by item and the s
 Indexing no longer calls out to the internet: the images used to be searched and downloaded at
 boot (DuckDuckGo/Bing), that script was removed from the AI repo and the dataset is now read
 from disk. A cold boot is self-contained — but it is only as good as what sits in
-`/opt/greener/ai-images`.
+`/opt/greener/image_dir`.
 
 ### The reference-image dataset
 
-`app_stack_ai_images_dir` (`/opt/greener/ai-images`) is bind-mounted **read-only** at
-`app_stack_ai_images_mount` (`/greener/image_dir`, which is `IMAGE_DIR` resolved against the AI
+`app_stack_ai_image_dir` (`/opt/greener/image_dir`) is bind-mounted **read-only** at
+`app_stack_ai_image_mount` (`/greener/image_dir`, which is `IMAGE_DIR` resolved against the AI
 image's WORKDIR). It is a **bind mount, not a named volume, on purpose**: the dataset is
 content, it does not ship in the image, and it is refreshed by hand — a named volume would put
 it out of reach of a plain `scp`.
@@ -148,7 +148,7 @@ so `Bouteille plastique/` and `bouteille_plastique/` both work. Extensions read:
 png, bmp, gif, webp, tif, tiff.
 
 ```
-/opt/greener/ai-images/
+/opt/greener/image_dir/
 ├── bouteille_plastique/   1.jpg  2.jpg  3.jpg
 ├── pot_de_yaourt/         …
 └── …
@@ -158,9 +158,15 @@ The directory is `deploy:greener`, mode `2775` (setgid), so any **greener** admi
 it over the VPN without root and uploads keep the group:
 
 ```bash
-scp -r ./image_dir/* lboillot@<vps>:/opt/greener/ai-images/
+scp -r ./image_dir/* lboillot@<vps>:/opt/greener/image_dir/
 docker compose -f /opt/greener/docker-compose.yml restart ai   # re-index the new labels
 ```
+
+The dataset was first uploaded by hand, before this role described it: the staging host had it
+as `lboillot:greener` mode `2555`, i.e. not even writable by its own owner. The first replay
+takes it over (`deploy:greener`, `2775`) and only the top directory — the 114 sub-directories
+keep the modes they were uploaded with, so adding an image **inside** an existing item may still
+need a `chmod` first. The content is never touched by Ansible.
 
 A restart alone only picks up items **missing** from qdrant (per-item skip). Replacing the
 images of an item that is already indexed changes nothing until its points are dropped from the
@@ -221,7 +227,7 @@ Non-blocking:
   (which exists only to add `curl` for a healthcheck), so CI has no third image to publish.
 - **AI model volume**: `ai_models` is mounted at `/root/.cache/huggingface` (default HF
   cache). Confirm the path with the AI owner if the image changes it (`HF_HOME`).
-- **Dataset ownership**: `/opt/greener/ai-images` is the one piece of state here that Ansible
+- **Dataset ownership**: `/opt/greener/image_dir` is the one piece of state here that Ansible
   does not describe — it is uploaded, not provisioned, so it is not replayable on a fresh VPS
   and is not covered by the backups role. Keep the master copy off the VPS (the AI repo's
   gitignored `image_dir/`). Moving it under infra ownership was rejected for the same reason
