@@ -19,11 +19,15 @@ WAN → Caddy (host, 80/443, TLS) → gateway (nginx, 127.0.0.1:8080) → backen
 2. Ships the gateway config to `/opt/greener/gateway/default.conf.template` (rendered by the
    nginx image's `envsubst` from `BACKEND_UPSTREAM` / `AI_UPSTREAM`) and the postgres init
    scripts to `/opt/greener/postgres-init/`.
-3. Pulls images and brings the stack up (`community.docker.docker_compose_v2`).
+3. Creates `/opt/greener/image_dir/`, the AI reference-image dataset (see below) — the only
+   artifact here that is NOT rendered by Ansible: its content is uploaded by hand.
+4. Pulls images and brings the stack up (`community.docker.docker_compose_v2`).
 
 Everything under `/opt/greener` is owned by `deploy`, the non-human CD account: that is what
 lets the recurring deploy re-render these files locally without root. The modes stay
-world-readable because the bind mounts are read by container uids, not by `deploy`.
+world-readable because the bind mounts are read by container uids, not by `deploy`. The one
+exception is `image_dir/`, group `greener` and group-writable — it is fed by a human, not by a
+deploy (see below).
 
 DB credentials are never written into the compose file: `${DB_USER/DB_PASSWORD/DB_NAME}` are
 interpolated by docker compose from `/opt/greener/.env` (0600, rendered by the backend role),
@@ -117,17 +121,61 @@ The AI service embeds the uploaded photo (`facebook/dinov2-small`) and searches 
 collection per region, so qdrant is a hard dependency, not an option.
 
 At **startup** it discovers the region JSON files in `DATA_DIR`, then for every item it does
-not already have in qdrant it searches and downloads reference images, embeds them and
-upserts the vectors. That work runs inside the FastAPI **lifespan**, i.e. **before uvicorn
-accepts any connection**: a cold start with an empty `qdrant_storage` takes many minutes
-(114 items × `IMAGES_PER_LABEL` images, CPU embedding) and the service answers nothing until
-it is done — hence `app_stack_ai_start_period` (20m) on the healthcheck. Once the volume is
-warm, indexing is skipped item by item and the start is quick. **Never `docker volume rm`
-`qdrant_storage`** unless a full re-index is intended.
+not already have in qdrant it reads `IMAGES_PER_LABEL` reference images from the local dataset
+(`IMAGE_DIR`), embeds them and upserts the vectors. That work runs inside the FastAPI
+**lifespan**, i.e. **before uvicorn accepts any connection**: a cold start with an empty
+`qdrant_storage` takes many minutes (114 items × `IMAGES_PER_LABEL` images, CPU embedding) and
+the service answers nothing until it is done — hence `app_stack_ai_start_period` (20m) on the
+healthcheck. Once the volume is warm, indexing is skipped item by item and the start is quick.
+**Never `docker volume rm` `qdrant_storage`** unless a full re-index is intended.
 
-Egress note: that indexing calls out to the internet (image search + downloads), so the VPS
-needs outbound HTTPS; it is not a self-contained boot. The searches hit DuckDuckGo first and
-fall back to Bing when rate-limited (403s in the logs are expected, not a failure).
+Indexing no longer calls out to the internet: the images used to be searched and downloaded at
+boot (DuckDuckGo/Bing), that script was removed from the AI repo and the dataset is now read
+from disk. A cold boot is self-contained — but it is only as good as what sits in
+`/opt/greener/image_dir`.
+
+### The reference-image dataset
+
+`app_stack_ai_image_dir` (`/opt/greener/image_dir`) is bind-mounted **read-only** at
+`app_stack_ai_image_mount` (`/greener/image_dir`, which is `IMAGE_DIR` resolved against the AI
+image's WORKDIR). It is a **bind mount, not a named volume, on purpose**: the dataset is
+content, it does not ship in the image, and it is refreshed by hand — a named volume would put
+it out of reach of a plain `scp`.
+
+Layout: **one sub-directory per item, named after the item's `nom`** in the region JSON
+(`data/<region>.json`). The match is exact or normalised (non-alphanumeric → `_`, lower case),
+so `Bouteille plastique/` and `bouteille_plastique/` both work. Extensions read: jpg, jpeg,
+png, bmp, gif, webp, tif, tiff.
+
+```
+/opt/greener/image_dir/
+├── bouteille_plastique/   1.jpg  2.jpg  3.jpg
+├── pot_de_yaourt/         …
+└── …
+```
+
+The directory is `deploy:greener`, mode `2775` (setgid), so any **greener** admin can refresh
+it over the VPN without root and uploads keep the group:
+
+```bash
+scp -r ./image_dir/* lboillot@<vps>:/opt/greener/image_dir/
+docker compose -f /opt/greener/docker-compose.yml restart ai   # re-index the new labels
+```
+
+The dataset was first uploaded by hand, before this role described it: the staging host had it
+as `lboillot:greener` mode `2555`, i.e. not even writable by its own owner. The first replay
+takes it over (`deploy:greener`, `2775`) and only the top directory — the 114 sub-directories
+keep the modes they were uploaded with, so adding an image **inside** an existing item may still
+need a `chmod` first. The content is never touched by Ansible.
+
+A restart alone only picks up items **missing** from qdrant (per-item skip). Replacing the
+images of an item that is already indexed changes nothing until its points are dropped from the
+collection, or `qdrant_storage` is wiped for a full re-index.
+
+An empty or missing dataset does not crash the service: indexing logs
+`Dataset directory not found` / `No local images available for '<item>'`, the port still opens,
+and every request then answers 422 (no match). So a missing upload fails **silently** from the
+gateway's point of view — check the `ai` logs after the first deploy.
 
 **VPS sizing** — measured on the dev stack while indexing: `ai` alone holds ~2.4 GB RSS
 (torch + tensorflow + the embedding model) and its image weighs ~3.6 GB; the whole stack sits
@@ -139,6 +187,10 @@ For a build-from-source stack, use `docker-compose.dev.yml` at the repo root
 (`docker compose -f docker-compose.dev.yml up`). It builds `backend` from its `Dockerfile.dev`
 and bind-mounts the source (hot reload); `ai` has only one `dockerfile` (no dev variant, no
 reload) and is a heavy build. Assumes the sibling-repo workspace layout.
+
+`ai` there reads the dataset from `../ai-service/image_dir` (gitignored in that repo): drop the
+images in it and restart the container, same layout as prod. Without it the mount is an empty
+directory and nothing gets indexed.
 
 ## Pending / cross-team
 
@@ -152,6 +204,12 @@ Blocks the first AI deploy, on the AI repo (owned by Houssem — do not change i
   that branch is merged and an image built from it is published.** The region files must
   come from the image, not from here: shipping them from infra would put AI content under
   infra ownership and let it drift from the image it is supposed to match.
+
+- **`image_dir` must not be `COPY`ed into the image**: `dockerfile` had
+  `COPY ./image_dir ./image_dir` while the dataset is gitignored, so it is absent from the CI
+  checkout and **every CI build fails** (`"/image_dir": not found`). Removing that line is on
+  the AI repo's `fix/LBT-SCRUM-122-image-dir-build`; the dataset comes from the bind mount
+  above. Until it is merged, no new `ai-*` image is published at all.
 
 Non-blocking:
 
@@ -169,7 +227,11 @@ Non-blocking:
   (which exists only to add `curl` for a healthcheck), so CI has no third image to publish.
 - **AI model volume**: `ai_models` is mounted at `/root/.cache/huggingface` (default HF
   cache). Confirm the path with the AI owner if the image changes it (`HF_HOME`).
-- **`IMAGE_BACKUP_DIR`**: the downloaded images are written but never read back, so nothing
-  is persisted for them here (`SAVE_IMAGES=false` in prod). Note the AI repo's own compose
-  mounts `./backup_images` while the code writes to `./image_backup` — a mismatch on their
-  side, harmless for us.
+- **Dataset ownership**: `/opt/greener/image_dir` is the one piece of state here that Ansible
+  does not describe — it is uploaded, not provisioned, so it is not replayable on a fresh VPS
+  and is not covered by the backups role. Keep the master copy off the VPS (the AI repo's
+  gitignored `image_dir/`). Moving it under infra ownership was rejected for the same reason
+  as `data/`: AI content would drift from the image meant to match it.
+- **The AI repo's own compose is out of sync with its code**: it mounts `./images` and
+  `./backup_images`, which nothing reads, and not `./image_dir` (`IMAGE_DIR`) — their side,
+  harmless for us, but it means their compose cannot index anything.

@@ -124,11 +124,15 @@ services:
       QDRANT_PORT: "6333"
       DEVICE: cpu
       DATA_DIR: ./data
+      IMAGE_DIR: ./image_dir
       LOG_LEVEL: INFO
     volumes:
       # The image ships data/ too; mounting the repo's copy lets a dev edit a region
       # JSON and just restart, instead of rebuilding a 3.6 GB image.
       - ../ai-service/data:/greener/data:ro
+      # The dataset is gitignored in the AI repo: an empty dir here just means no label is
+      # indexed (warnings, no crash). In prod it comes from the host via scp.
+      - ../ai-service/image_dir:/greener/image_dir:ro
       - ai_models:/root/.cache/huggingface
     expose:
       - "8443"

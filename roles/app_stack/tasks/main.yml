@@ -56,6 +56,16 @@
     - "{{ app_stack_gateway_dir }}"
     - "{{ app_stack_postgres_init_dir }}"
 
+# Kept out of the loop above: this one is fed by a human over the VPN, so it needs the
+# greener group and the setgid bit rather than the deploy-only 0755 of the rendered artifacts.
+- name: Ensure the AI dataset directory exists
+  ansible.builtin.file:
+    path: "{{ app_stack_ai_image_dir }}"
+    state: directory
+    owner: "{{ app_stack_owner }}"
+    group: "{{ greener_group }}"
+    mode: "2775"
+
 - name: Deploy the internal gateway config template
   ansible.builtin.copy:
     src: gateway/default.conf.template
