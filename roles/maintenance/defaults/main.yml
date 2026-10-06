@@ -1,0 +1,24 @@
+---
+# Master switch: script and units are always deployed (so --check shows a real diff on a
+# fresh host), the timer is only started where it is wanted.
+maintenance_enabled: true
+
+maintenance_script: /usr/local/bin/greener-docker-prune
+maintenance_unit: greener-docker-prune
+
+# Dangling images and stale build cache only — never `prune -a`, which would delete the
+# tagged AI image the moment its container is stopped.
+maintenance_builder_keep: "168h"
+
+# Sunday 04:30, after the 03:00 dump and its 03:20 off-site copy have finished.
+maintenance_on_calendar: "Sun *-*-* 04:30:00"
+maintenance_persistent: true
+maintenance_on_boot: 15min
+maintenance_randomized_delay: 300
+
+# systemd defaults the journal to 10% of the filesystem — 7.7 GB here. Searchable history
+# lives in Loki, so the local journal only needs to cover the last few days.
+maintenance_journald_dropin_dir: /etc/systemd/journald.conf.d
+maintenance_journald_dropin: greener.conf
+maintenance_journal_max_use: 500M
+maintenance_journal_max_file_size: 50M

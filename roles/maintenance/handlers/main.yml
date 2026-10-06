@@ -1,0 +1,13 @@
+---
+- name: Reload systemd for maintenance
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: not ansible_check_mode
+
+# Restart, not reload: journald re-reads its limits only on restart, and it enforces them
+# at startup — so this is also what trims a journal that is already over the cap.
+- name: Restart journald
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted
+  when: not ansible_check_mode

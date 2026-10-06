@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Nettoyage conservateur des images et du cache de build Docker
+# Not Requires=: a stopped Docker should make this run fail and be visible, not be skipped.
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart={{ maintenance_script }} --builder-keep {{ maintenance_builder_keep }}
