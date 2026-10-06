@@ -577,3 +577,10 @@ monitoring_alert_wanted_uids: >-
 # What must be deleted from Grafana on this run.
 monitoring_alert_unwanted_uids: >-
   {{ monitoring_alert_all_uids | difference(monitoring_alert_wanted_uids) }}
+
+# --- Container logs ------------------------------------------------------------------------
+# Same values as the daemon-wide cap, pinned per service in the compose file: dockerd reads
+# its log policy at container creation and only applies a changed one after a restart, so a
+# container created in between would keep an unlimited log.
+monitoring_log_max_size: "10m"
+monitoring_log_max_file: "3"

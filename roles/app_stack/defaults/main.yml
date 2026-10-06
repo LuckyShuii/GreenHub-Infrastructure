@@ -114,3 +114,10 @@ app_stack_mem_limits:
   backend: 1g
   qdrant: 1536m
   ai: 5g
+
+# --- Container logs ------------------------------------------------------------------------
+# Same values as the daemon-wide cap, pinned per service in the compose file: dockerd reads
+# its log policy at container creation and only applies a changed one after a restart, so a
+# container created in between would keep an unlimited log.
+app_stack_log_max_size: "10m"
+app_stack_log_max_file: "3"
