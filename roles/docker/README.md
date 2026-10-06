@@ -17,12 +17,13 @@ Installs Docker from Docker's **official APT repository** (never the distro's
 ## Container log rotation
 
 Docker's `json-file` driver **rotates nothing by default**: a container's log grows until
-the disk is full. With real services now logging (SCRUM-129) on a host already at 77% of
+the disk is full. With real services now logging on a host already at 77% of
 77 GB, that is a matter of weeks, not a theoretical risk.
 
-The cap is set on the **daemon**, not per compose service, so it also covers the containers
-this repo does not render — the monitoring stack, anything started by hand. One place, and
-no way to forget a service.
+The cap is set on the **daemon**, so it covers the containers this repo does not render —
+anything started by hand. It is **also pinned per service** in the compose files rendered by
+`app_stack` and `monitoring`, and that is what actually bounds our own containers; see the
+first bullet below for why one of the two is not enough.
 
 | | |
 |---|---|
@@ -30,13 +31,15 @@ no way to forget a service.
 | What that buys | roughly a day of the busiest container |
 | Where history lives | **Loki**, with its own retention — `docker logs` is only what you read before Grafana is open |
 
-Three things are easy to get wrong here:
+Two things are easy to get wrong here:
 
-- **The daemon reads `log-opts` at container creation.** A reload applies them to
-  containers created *afterwards*; the ones already running keep their unlimited setting
-  until their next recreation (any deploy does it).
-- **The handler reloads, it never restarts.** Restarting `dockerd` stops every container on
-  the host — the application included — for a change that only affects future containers.
+- **A reload does not apply a changed log policy; only a restart does.** Measured on the
+  VPS: `daemon.json` was rendered — and reloaded — on 21/09, and a container created the
+  next day still grew a 674 MB single log file. `dockerd` hands its new default only to
+  containers created after a real restart, and a container already running keeps whatever
+  policy it was created with until it is recreated. The handler here still only reloads,
+  because restarting `dockerd` stops every container on the host; the per-service pin in
+  the compose files is what closes the gap.
 - **The template carries no `ansible_managed` header**, unlike every other file this repo
   renders. `dockerd` rejects any key it does not know, comment-shaped or not, and then
   refuses to start. Hence also the `validate:` on the template task: a malformed

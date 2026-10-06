@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Déclenche le nettoyage Docker ({{ maintenance_on_calendar }})
+
+[Timer]
+# OnBootSec makes a fresh deploy clean up immediately instead of waiting for Sunday.
+OnBootSec={{ maintenance_on_boot }}
+OnCalendar={{ maintenance_on_calendar }}
+Persistent={{ maintenance_persistent | bool | ternary('true', 'false') }}
+RandomizedDelaySec={{ maintenance_randomized_delay }}
+Unit={{ maintenance_unit }}.service
+
+[Install]
+WantedBy=timers.target

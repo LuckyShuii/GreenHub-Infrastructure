@@ -1,9 +1,18 @@
 # {{ ansible_managed }} — rendered by the monitoring role, do not edit on the host.
 # The Grafana admin password comes from {{ monitoring_env_file }} (0600): no secret here.
+# Each service carries the same bounded json-file logging: the daemon-wide cap only reaches
+# containers created after the daemon was last restarted, so the limit is pinned here too.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "{{ monitoring_log_max_size }}"
+    max-file: "{{ monitoring_log_max_file }}"
+
 services:
   loki:
     image: {{ monitoring_loki_image }}
     restart: unless-stopped
+    logging: *logging
     command: ["-config.file=/etc/loki/config.yml"]
     volumes:
       - {{ monitoring_config_dir }}/loki.yml:/etc/loki/config.yml:ro
@@ -20,6 +29,7 @@ services:
   alloy:
     image: {{ monitoring_alloy_image }}
     restart: unless-stopped
+    logging: *logging
     depends_on:
       loki:
         condition: service_started
@@ -90,6 +100,7 @@ services:
   prometheus:
     image: {{ monitoring_prometheus_image }}
     restart: unless-stopped
+    logging: *logging
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -116,6 +127,7 @@ services:
   grafana:
     image: {{ monitoring_grafana_image }}
     restart: unless-stopped
+    logging: *logging
     depends_on:
       loki:
         condition: service_started
@@ -173,6 +185,7 @@ services:
   postgres_exporter:
     image: {{ monitoring_postgres_exporter_image }}
     restart: unless-stopped
+    logging: *logging
     env_file:
       - {{ monitoring_postgres_exporter_env_file }}
     # Never published: only Alloy scrapes it, on the monitoring network.
