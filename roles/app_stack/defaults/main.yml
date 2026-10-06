@@ -71,6 +71,9 @@ app_stack_ai_models_volume: ai_models
 # Same basename as IMAGE_DIR on purpose: host path and container path read alike, and the
 # dataset that is already on the VPS stays where it is.
 app_stack_ai_image_dir: "{{ app_stack_dir }}/image_dir"
+# Duplicated from the common role rather than read from it: common runs in another play,
+# so its defaults are out of scope here (same rule as backups_dir_group).
+app_stack_dataset_group: greener
 # Where that mount lands in the container: IMAGE_DIR (ai_image_dir, "./image_dir") resolved
 # against the AI image's WORKDIR /greener. Keep the two in sync.
 app_stack_ai_image_mount: "/greener/image_dir"

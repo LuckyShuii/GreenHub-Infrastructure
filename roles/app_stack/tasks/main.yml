@@ -63,7 +63,7 @@
     path: "{{ app_stack_ai_image_dir }}"
     state: directory
     owner: "{{ app_stack_owner }}"
-    group: "{{ greener_group }}"
+    group: "{{ app_stack_dataset_group }}"
     mode: "2775"
 
 - name: Deploy the internal gateway config template
