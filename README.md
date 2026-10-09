@@ -28,7 +28,8 @@ roles/
   caddy/                         # REAL: host-facing reverse proxy (TLS), proxies to the gateway
   monitoring/                    # REAL: centralised logs (Loki + Alloy + Grafana), own compose project
   webhook/                       # REAL: CD receiver (adnanh/webhook) + the local deploy tooling
-  firewall/ ssh/ openvpn/ backups/               # valid stubs
+  firewall/                      # REAL: ufw default-deny, 443/1194 (+80) open, SSH VPN-only
+  ssh/ openvpn/ backups/                         # valid stubs
 ```
 
 ## Prerequisites
