@@ -124,3 +124,7 @@ will not undo it.
   `no_log` / `diff: false` like every other secret-bearing template here.
 - The collections are installed on the host from the same pinned `requirements.yml` as the
   control host, so a local run behaves like a push run.
+- **A change to `app_stack` or `backend` must be deployed with `--tags webhook` too.** The
+  deploy runs read the copy under `webhook_ansible_dir`, not the control host's roles, so a
+  run tagged `app_stack` alone re-renders the compose file once and the next webhook deploy
+  rewrites it from the stale template.
