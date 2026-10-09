@@ -81,6 +81,7 @@ services:
     container_name: greener-qdrant-dev
     environment:
       QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__LOG_LEVEL: "WARN"
     expose:
       - "6333"
     volumes:
@@ -125,7 +126,7 @@ services:
       DEVICE: cpu
       DATA_DIR: ./data
       IMAGE_DIR: ./image_dir
-      LOG_LEVEL: INFO
+      LOG_LEVEL: WARN
     volumes:
       # The image ships data/ too; mounting the repo's copy lets a dev edit a region
       # JSON and just restart, instead of rebuilding a 3.6 GB image.

@@ -91,8 +91,10 @@ ai_data_dir: "./data"
 # unlike data/ it does NOT ship in the image: it is bind-mounted from the host and refreshed
 # by hand (see app_stack_ai_image_dir).
 ai_image_dir: "./image_dir"
-ai_log_level: "INFO"
+ai_log_level: "WARN"
 
 # Qdrant vector store, internal to the compose stack (service name = hostname).
 qdrant_host: "qdrant"
 qdrant_port: 6333
+# Le sien, pas celui du service AI : Qdrant logge chaque requête en INFO.
+qdrant_log_level: "WARN"
