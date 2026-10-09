@@ -1,6 +1,26 @@
 ---
-# ssh role — valid stub. Real logic lands in a dedicated ticket.
-# The debug task is a no-op: stays "ok", never "changed" (idempotent).
-- name: Placeholder (no action)
-  ansible.builtin.debug:
-    msg: "Role {{ ansible_role_name }}: stub — nothing to do yet."
+# Runs after common: accounts and their public keys must exist before password
+# and root logins are switched off, or a fresh VPS locks everyone out.
+- name: Ensure OpenSSH server is installed
+  ansible.builtin.apt:
+    name: openssh-server
+    state: present
+
+# Full file (no Include of sshd_config.d): a cloud-init drop-in re-enabling
+# PasswordAuthentication can no longer override the hardening.
+- name: Render hardened sshd_config
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload ssh
+
+# No `enabled:` here: on noble ssh.service is started on demand by ssh.socket
+# (the package's default), forcing the service unit enabled would bypass that.
+- name: Ensure ssh service is running
+  ansible.builtin.service:
+    name: ssh
+    state: started
