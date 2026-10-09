@@ -10,6 +10,28 @@ caddy_keyring_path: /etc/apt/keyrings/caddy-stable.asc
 caddy_gpg_url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
 caddy_repo_uri: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
 
+# Circuit breaker for the repo above, because it is hosted on Cloudsmith and the Caddy
+# project periodically exhausts its bandwidth quota there: the repo then answers
+# 402 Payment Required (2026-10-09, and caddyserver/dist#114, #115, #142 before it).
+#
+# `apt-get update` exits non-zero when ANY configured repo fails, so a third-party repo
+# being down breaks every apt task on the host — starting with `common : Install base
+# packages`, which has nothing to do with Caddy. One upstream outage, and no role can be
+# deployed at all.
+#
+# Set to false to have apt skip the repo while keeping it declared and versioned here:
+#     make deploy ENV=production -e caddy_repo_enabled=false
+# Caddy itself stays installed and running at whatever version it already has; only
+# installs and upgrades are suspended. Flip it back by simply dropping the flag once
+# upstream recovers — the steady state stays `true`, deliberately, so a committed `false`
+# can never quietly outlive the outage that justified it.
+#
+# Note the ordering trap: the caddy role cannot disable its OWN repo on a host where the
+# repo is currently enabled, because `common` and this role's own prereq task both run
+# `apt-get update` first and die before reaching the task below. Breaking out of that
+# needs one targeted replay, which the role README spells out.
+caddy_repo_enabled: true
+
 # APT prerequisites to fetch the key/repo over HTTPS.
 caddy_apt_prereqs:
   - ca-certificates

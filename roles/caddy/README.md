@@ -48,8 +48,43 @@ The contact line comes from `caddy_privacy_contact`.
 | `caddy_domain` | `lucasboillot.fr` | Env-specific; set per env in `inventories/<env>/group_vars/all/vars.yml`. |
 | `caddy_acme_staging` | `true` | **Staging by default** (Let's Encrypt rate limits). Flip to `false` for trusted prod certs. |
 | `caddy_backend_upstream` | `127.0.0.1:8000` | Internal upstream. Caddy runs on the host, so reach containers via a **published** port, not a container name. May be absent — a `200` fallback is served. |
+| `caddy_repo_enabled` | `true` | Circuit breaker for the Cloudsmith APT repo. See below. |
 
 Holds **no secrets** (no vault).
+
+## When the Cloudsmith repo is down
+
+Caddy's APT repo lives on Cloudsmith, and the Caddy project periodically exhausts its
+bandwidth quota there; the repo then answers `402 Payment Required` for everyone
+(`caddyserver/dist#114`, `#115`, `#142`). Because `apt-get update` exits non-zero when *any*
+configured repo fails, this breaks **every** apt task on the host — the first casualty is
+`common : Install base packages`, which has nothing to do with Caddy. The whole playbook
+dies on its first task.
+
+`caddy_repo_enabled: false` writes `Enabled: no` into the repo's `.sources` file: apt skips
+it, the repo stays declared and versioned here, and the installed Caddy keeps running
+untouched. Only installs and upgrades are suspended.
+
+There is an ordering trap. This role cannot disable its own repo on a host where the repo is
+still enabled, because `common` runs first and this role's own prereq task also runs
+`apt-get update` — both die before reaching the repo task. Breaking out needs one targeted
+replay that starts *at* the repo task:
+
+```sh
+# 1. Flip the repo, using this role's own task, skipping the apt tasks that would die first.
+ansible-playbook -i inventories/<env>/hosts.yml site.yml \
+  --tags caddy --start-at-task "Configure Caddy APT repository" \
+  -e caddy_repo_enabled=false
+
+# 2. apt is usable again — replay normally.
+make deploy ENV=<env> -e caddy_repo_enabled=false
+```
+
+Once upstream recovers, just drop the flag: the default is `true`, so nothing has to be
+un-done, and a forgotten `false` cannot outlive the outage.
+
+A fresh host cannot install Caddy at all while the repo is down — that is the honest
+failure, not something this flag can paper over.
 
 ## Verify
 
