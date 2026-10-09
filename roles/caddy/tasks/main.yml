@@ -36,7 +36,7 @@
     suites: ["any-version"]
     components: [main]
     signed_by: "{{ caddy_keyring_path }}"
-    enabled: true
+    enabled: "{{ caddy_repo_enabled }}"
     state: present
   register: caddy_repo
 
