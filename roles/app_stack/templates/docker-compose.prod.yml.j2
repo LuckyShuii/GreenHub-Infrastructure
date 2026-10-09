@@ -112,6 +112,8 @@ services:
     volumes:
       - {{ app_stack_ai_models_volume }}:/root/.cache/huggingface
       - {{ app_stack_ai_image_dir }}:{{ app_stack_ai_image_mount }}:ro
+      - {{ app_stack_ai_src_dir }}:{{ app_stack_ai_src_mount }}:ro
+      - {{ app_stack_ai_data_dir }}:{{ app_stack_ai_data_mount }}:ro
     networks:
       - greener_internal
     # Stopgap TCP check until the AI service exposes /health. Its startup indexing runs
