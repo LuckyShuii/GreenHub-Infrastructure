@@ -47,10 +47,13 @@ webhook_deploy_script: /usr/local/bin/greener-deploy
 webhook_lock_file: /var/lock/greener-deploy.lock
 webhook_lock_timeout: 900
 
-# Hook id -> compose service. The ids come from the QA<->infra contract, which says
-# deploy-ia where the compose service is named ai.
+# Hook id -> compose service, and the id is always deploy-<compose service>. It used to be
+# deploy-ia against a service named ai; the pipeline called deploy-ai and got a 404 from the
+# daemon for three weeks, unnoticed because the deploy job only runs on a push to a
+# long-lived branch. Keeping the two spellings identical is what makes that class of typo
+# impossible rather than merely documented.
 webhook_deploy_hooks:
   - id: deploy-backend
     service: backend
-  - id: deploy-ia
+  - id: deploy-ai
     service: ai

@@ -104,7 +104,7 @@ Provisioning is a **push** run from a workstation; the **recurring** deploy runs
 itself. After publishing an image, the pipeline POSTs to the deploy endpoint:
 
 ```
-POST https://deploy.<domain>/hooks/deploy-backend   (or /hooks/deploy-ia)
+POST https://deploy.<domain>/hooks/deploy-backend   (or /hooks/deploy-ai)
 X-Deploy-Token: <VPS_DEPLOY_KEY>
 {"version": "<commit sha>"}      # or "latest"
 ```
