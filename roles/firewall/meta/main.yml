@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: firewall
   author: GREENER infra
-  description: "ufw firewall (default deny, VPN-only) (stub)."
+  description: "UFW firewall with default-deny ingress and VPN-only SSH."
   license: MIT
   min_ansible_version: "2.15"
   platforms:
