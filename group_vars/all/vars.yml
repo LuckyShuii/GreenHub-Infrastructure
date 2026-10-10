@@ -81,7 +81,7 @@ grafana_public: true
 # AI service: names/values mirror the ai-service repo (.env.example + configs.py).
 # The old AI_PIPELINE_MODEL_NAME (image-classification pipeline) is gone: the service now
 # embeds images and searches a Qdrant vector store.
-ai_embedding_model: "facebook/dinov2-small"
+ai_embedding_model: "facebook/dinov2-large"
 ai_host: "0.0.0.0"
 ai_port: 8443
 ai_device: "cpu"
@@ -91,6 +91,10 @@ ai_data_dir: "./data"
 # unlike data/ it does NOT ship in the image: it is bind-mounted from the host and refreshed
 # by hand (see app_stack_ai_image_dir).
 ai_image_dir: "./image_dir"
+# Poids du modele d'embedding. Relatif au WORKDIR aussi, et bind-monte depuis l'hote comme
+# image_dir : le service charge le modele en local_files_only, il ne retombe pas sur un
+# telechargement HuggingFace si le repertoire est vide (voir app_stack_ai_models_dir).
+ai_model_dir: "./models"
 ai_log_level: "WARN"
 
 # Qdrant vector store, internal to the compose stack (service name = hostname).
