@@ -31,7 +31,8 @@ exceptions are `image_dir/` and `models/`, group `greener` and group-writable â€
 by a human, not by a deploy (see below).
 
 DB credentials are never written into the compose file: `${DB_USER/DB_PASSWORD/DB_NAME}` are
-interpolated by docker compose from `/opt/greener/.env` (0600, rendered by the backend role),
+interpolated by docker compose from `/opt/greener/.env` (0640 `deploy:greener`, rendered by
+the backend role),
 so the compose stays secret-free.
 
 Requires the **docker** role (engine + compose plugin) and the **backend** role

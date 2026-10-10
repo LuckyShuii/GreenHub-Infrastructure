@@ -19,7 +19,7 @@
     dest: "{{ backend_env_path }}"
     owner: "{{ backend_env_owner }}"
     group: "{{ backend_env_group }}"
-    mode: "0600"
+    mode: "{{ backend_env_file_mode }}"
   diff: false
   no_log: "{{ hide_secrets | default(true) }}"
   tags: [backend, backend-env]

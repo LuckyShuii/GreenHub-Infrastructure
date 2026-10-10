@@ -1,5 +1,6 @@
 # {{ ansible_managed }} — rendered by the app_stack role, do not edit on the host.
-# ${DB_*} is interpolated by compose from {{ app_stack_env_file }} (0600), so no secret lands here.
+# ${DB_*} is interpolated by compose from {{ app_stack_env_file }} (0640 deploy:greener), so no
+# secret lands here.
 #
 # Every service carries a mem_limit (see app_stack_mem_limits). Two reasons, and the
 # second one is the important one: it lets the monitoring role alert on a share of each
