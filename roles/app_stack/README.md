@@ -19,17 +19,16 @@ WAN → Caddy (host, 80/443, TLS) → gateway (nginx, 127.0.0.1:8080) → backen
 2. Ships the gateway config to `/opt/greener/gateway/default.conf.template` (rendered by the
    nginx image's `envsubst` from `BACKEND_UPSTREAM` / `AI_UPSTREAM`) and the postgres init
    scripts to `/opt/greener/postgres-init/`.
-3. Creates `/opt/greener/image_dir/`, the AI reference-image dataset (see below) — the only
-   artifact here that is NOT rendered by Ansible: its content is uploaded by hand.
+3. Creates `/opt/greener/image_dir/` (AI reference-image dataset) and `/opt/greener/models/`
+   (embedding-model weights), the two artifacts here that are NOT rendered by Ansible: their
+   content is uploaded by hand (see below).
 4. Pulls images and brings the stack up (`community.docker.docker_compose_v2`).
 
 Everything under `/opt/greener` is owned by `deploy`, the non-human CD account: that is what
-lets the recurring deploy re-render these files locally without root. The group is `greener`,
-so a dev can read the deployed configuration — the `.env` included (`0640`) — without root;
-the modes grant the group no write, because Ansible must stay the only writer here. The
-exception is `image_dir/`, group-writable (`2775`) — it is fed by a human, not by a deploy
-(see below). `/opt/greener/ansible/` is not ours: the `webhook` role owns it and keeps it
-`deploy:deploy 0750`.
+lets the recurring deploy re-render these files locally without root. The modes stay
+world-readable because the bind mounts are read by container uids, not by `deploy`. The one
+exceptions are `image_dir/` and `models/`, group `greener` and group-writable — they are fed
+by a human, not by a deploy (see below).
 
 DB credentials are never written into the compose file: `${DB_USER/DB_PASSWORD/DB_NAME}` are
 interpolated by docker compose from `/opt/greener/.env` (0640 `deploy:greener`, rendered by
@@ -120,7 +119,7 @@ not stop the gateway from booting (same resilience as the Caddyfile fallback).
 
 ## AI service and qdrant
 
-The AI service embeds the uploaded photo (`facebook/dinov2-small`) and searches a **Qdrant**
+The AI service embeds the uploaded photo (`facebook/dinov2-large`) and searches a **Qdrant**
 collection per region, so qdrant is a hard dependency, not an option.
 
 At **startup** it discovers the region JSON files in `DATA_DIR`, then for every item it does
@@ -171,6 +170,35 @@ takes it over (`deploy:greener`, `2775`) and only the top directory — the 114 
 keep the modes they were uploaded with, so adding an image **inside** an existing item may still
 need a `chmod` first. The content is never touched by Ansible.
 
+### The embedding-model weights
+
+`app_stack_ai_models_dir` (`/opt/greener/models`) is bind-mounted **read-only** at
+`app_stack_ai_models_mount` (`/greener/models`, which is `EMBEDDING_MODEL_DIR` resolved against
+the WORKDIR). Layout: **one sub-directory per model, named after `EMBEDDING_MODEL_NAME` with
+`/` replaced by `--`**, holding `config.json`, `preprocessor_config.json` and the
+`*.safetensors`:
+
+```
+/opt/greener/models/
+└── facebook--dinov2-large/   config.json  preprocessor_config.json  model.safetensors
+```
+
+Why a bind mount and not the image: the AI repo tracks `*.safetensors` with **git-lfs**, so its
+`COPY ./models ./models` only bakes in real weights if the CI checkout pulls lfs — otherwise the
+image ships a ~130-byte pointer file, which `is_model_available()` accepts and
+`from_pretrained()` then chokes on. Same `deploy:greener` / `2775` as the dataset, so the upload
+is a plain `scp` over the VPN:
+
+```bash
+scp -r ./models/facebook--dinov2-large lboillot@<vps>:/opt/greener/models/
+docker compose -f /opt/greener/docker-compose.yml restart ai
+```
+
+**The directory name must match `EMBEDDING_MODEL_NAME`** (`ai_embedding_model`): the service
+loads with `local_files_only=True` and raises `FileNotFoundError` when the directory is missing
+or incomplete — there is **no download fallback at runtime**. A mismatch between the pinned
+model name and what sits on the VPS is a boot failure, not a slow start.
+
 A restart alone only picks up items **missing** from qdrant (per-item skip). Replacing the
 images of an item that is already indexed changes nothing until its points are dropped from the
 collection, or `qdrant_storage` is wiped for a full re-index.
@@ -194,6 +222,10 @@ reload) and is a heavy build. Assumes the sibling-repo workspace layout.
 `ai` there reads the dataset from `../ai-service/image_dir` (gitignored in that repo): drop the
 images in it and restart the container, same layout as prod. Without it the mount is an empty
 directory and nothing gets indexed.
+
+It also reads the model weights from `../ai-service/models`, which are **git-lfs** there: run
+`git lfs pull` in the AI repo first, or the directory holds a pointer file and the container
+fails to load the model.
 
 ## Pending / cross-team
 
@@ -229,9 +261,11 @@ Non-blocking:
   `.env.example`. Bump them together. We use the official image, not its `qdrant.dockerfile`
   (which exists only to add `curl` for a healthcheck), so CI has no third image to publish.
 - **AI model volume**: `ai_models` is mounted at `/root/.cache/huggingface` (default HF
-  cache). Confirm the path with the AI owner if the image changes it (`HF_HOME`).
-- **Dataset ownership**: `/opt/greener/image_dir` is the one piece of state here that Ansible
-  does not describe — it is uploaded, not provisioned, so it is not replayable on a fresh VPS
+  cache). Since the service switched to `EMBEDDING_MODEL_DIR` + `local_files_only=True` it has
+  nothing left to cache there — the volume is kept for now (it costs nothing and `download_model.py`
+  still goes through the hub) but it is a candidate for removal.
+- **Dataset ownership**: `/opt/greener/image_dir` and `/opt/greener/models` are the state here
+  that Ansible does not describe — it is uploaded, not provisioned, so it is not replayable on a fresh VPS
   and is not covered by the backups role. Keep the master copy off the VPS (the AI repo's
   gitignored `image_dir/`). Moving it under infra ownership was rejected for the same reason
   as `data/`: AI content would drift from the image meant to match it.
