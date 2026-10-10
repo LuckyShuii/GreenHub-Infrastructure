@@ -24,13 +24,16 @@ WAN → Caddy (host, 80/443, TLS) → gateway (nginx, 127.0.0.1:8080) → backen
 4. Pulls images and brings the stack up (`community.docker.docker_compose_v2`).
 
 Everything under `/opt/greener` is owned by `deploy`, the non-human CD account: that is what
-lets the recurring deploy re-render these files locally without root. The modes stay
-world-readable because the bind mounts are read by container uids, not by `deploy`. The one
-exception is `image_dir/`, group `greener` and group-writable — it is fed by a human, not by a
-deploy (see below).
+lets the recurring deploy re-render these files locally without root. The group is `greener`,
+so a dev can read the deployed configuration — the `.env` included (`0640`) — without root;
+the modes grant the group no write, because Ansible must stay the only writer here. The
+exception is `image_dir/`, group-writable (`2775`) — it is fed by a human, not by a deploy
+(see below). `/opt/greener/ansible/` is not ours: the `webhook` role owns it and keeps it
+`deploy:deploy 0750`.
 
 DB credentials are never written into the compose file: `${DB_USER/DB_PASSWORD/DB_NAME}` are
-interpolated by docker compose from `/opt/greener/.env` (0600, rendered by the backend role),
+interpolated by docker compose from `/opt/greener/.env` (0640 `deploy:greener`, rendered by
+the backend role),
 so the compose stays secret-free.
 
 Requires the **docker** role (engine + compose plugin) and the **backend** role

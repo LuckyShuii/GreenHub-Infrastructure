@@ -10,8 +10,10 @@ from `vault_db_password`) into a plain `.env` file at deploy time.
 ## What it does
 
 - Ensures `/opt/greener` exists.
-- Renders `templates/env.j2` to `/opt/greener/.env` (`0600`, owned by the non-human `deploy`
-  account so the recurring deploy can re-render it locally without root).
+- Renders `templates/env.j2` to `/opt/greener/.env` (`0640 deploy:greener` — owned by the
+  non-human `deploy` account so the recurring deploy can re-render it locally without root,
+  readable by the `greener` group so a dev can just `cat` it; see `backend_env_group` in the
+  defaults for why that is not a widening).
 - Sets `diff: false` on the template task so secrets never land in `--check --diff` output
   or CI logs.
 
@@ -28,6 +30,8 @@ containers with the same deploy.
 | `backend_db_port` | `5432` | |
 | `backend_db_name` | `greener` | |
 | `backend_db_user` | `greener` | |
+| `backend_env_group` | `greener` | Group of `/opt/greener` and of the rendered `.env`; must match `app_stack_group`. |
+| `backend_env_file_mode` | `0640` | Mode of the rendered `.env` (group read, no write). |
 
 Secrets consumed (via indirection, never `vault_*` directly): `db_password`.
 

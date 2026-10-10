@@ -10,8 +10,16 @@ app_stack_services: []
 # Artifacts belong to the non-human CD account so the recurring deploy (deploy.yml, run
 # locally as `deploy`) re-renders them without root. Modes stay world-readable: the bind
 # mounts are read by container uids, not by `deploy`.
+# Le groupe est greener (et non deploy) pour que les devs lisent la configuration deployee
+# sans root : /opt/greener, les artefacts rendus, et le .env du role backend, qui partage
+# cette valeur — si les deux roles divergeaient, ils se renverraient le groupe du repertoire
+# a chaque run. Les modes, eux, ne donnent PAS l'ecriture au groupe : Ansible reste le seul
+# a ecrire ici, un fichier rendu remplace a la main etant exactement la derive que la regle
+# "rien a la main sur le serveur" interdit.
+# /opt/greener/ansible reste en dehors : il appartient au role webhook, et son groupe
+# commande aussi le fichier hooks.json, qui porte le jeton du webhook de deploiement.
 app_stack_owner: deploy
-app_stack_group: deploy
+app_stack_group: greener
 
 app_stack_dir: /opt/greener
 app_stack_env_file: "{{ app_stack_dir }}/.env"
