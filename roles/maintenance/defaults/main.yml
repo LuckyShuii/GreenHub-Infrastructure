@@ -10,6 +10,12 @@ maintenance_unit: greener-docker-prune
 # tagged AI image the moment its container is stopped.
 maintenance_builder_keep: "168h"
 
+# Above this, a weekly run reports itself at warning priority instead of info. Sized on the
+# incident: an orphaned AI image is ~12 GB, and `deploy.yml` prunes its own leftovers, so
+# anything over a few GB here means garbage accumulated outside the deploy path. The deploy
+# run passes a threshold of its own (see deploy.yml) — it orphans that image on purpose.
+maintenance_reclaim_warn_mib: 5120
+
 # Sunday 04:30, after the 03:00 dump and its 03:20 off-site copy have finished.
 maintenance_on_calendar: "Sun *-*-* 04:30:00"
 maintenance_persistent: true
@@ -22,3 +28,10 @@ maintenance_journald_dropin_dir: /etc/systemd/journald.conf.d
 maintenance_journald_dropin: greener.conf
 maintenance_journal_max_use: 500M
 maintenance_journal_max_file_size: 50M
+
+# The journald drop-in above bounds the binary journal only. Text logs under /var/log stay
+# logrotate's job, with the distro's own rules — all this does is make sure the package and
+# its timer are actually there, since nothing else in this repo installs them.
+maintenance_logrotate_packages:
+  - logrotate
+maintenance_logrotate_timer: logrotate.timer

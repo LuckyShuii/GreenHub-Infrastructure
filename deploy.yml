@@ -28,6 +28,10 @@
     # with sudo and has no business in a deploy run that deliberately has none.
     deploy_prune_script: /usr/local/bin/greener-docker-prune
     deploy_prune_builder_keep: "168h"
+    # Higher than the timer's threshold, because this run is the one that orphans the ~12 GB
+    # AI image on purpose: reclaiming it is the expected outcome here, not an anomaly. Past
+    # 20 GB more than one generation had gone stale, which is worth a line in the journal.
+    deploy_prune_warn_above_mib: 20480
 
   pre_tasks:
     # The daemon already rejects a malformed request with a 403, but the playbook must not
@@ -111,7 +115,9 @@
     # this playbook's exit code.
     - name: Supprimer les images orphelines laissées par le déploiement
       ansible.builtin.command: >-
-        {{ deploy_prune_script }} --builder-keep {{ deploy_prune_builder_keep }}
+        {{ deploy_prune_script }}
+        --builder-keep {{ deploy_prune_builder_keep }}
+        --warn-above {{ deploy_prune_warn_above_mib }}
       register: deploy_prune
       changed_when: false
       failed_when: false

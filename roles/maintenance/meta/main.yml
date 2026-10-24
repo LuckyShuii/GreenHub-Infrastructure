@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: maintenance
   author: GREENER infra
-  description: "Conservative Docker prune on a systemd timer, and a bounded system journal."
+  description: "Conservative Docker prune on a systemd timer, a bounded system journal, logrotate present."
   license: MIT
   min_ansible_version: "2.15"
   platforms:
