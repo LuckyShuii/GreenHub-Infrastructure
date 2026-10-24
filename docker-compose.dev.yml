@@ -81,6 +81,7 @@ services:
     container_name: greener-qdrant-dev
     environment:
       QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__LOG_LEVEL: "WARN"
     expose:
       - "6333"
     volumes:
@@ -119,16 +120,24 @@ services:
     environment:
       AI_HOST: 0.0.0.0
       AI_PORT: "8443"
-      EMBEDDING_MODEL_NAME: facebook/dinov2-small
+      EMBEDDING_MODEL_NAME: facebook/dinov2-large
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
       DEVICE: cpu
       DATA_DIR: ./data
-      LOG_LEVEL: INFO
+      IMAGE_DIR: ./image_dir
+      EMBEDDING_MODEL_DIR: ./models
+      LOG_LEVEL: WARN
     volumes:
       # The image ships data/ too; mounting the repo's copy lets a dev edit a region
       # JSON and just restart, instead of rebuilding a 3.6 GB image.
       - ../ai-service/data:/greener/data:ro
+      # The dataset is gitignored in the AI repo: an empty dir here just means no label is
+      # indexed (warnings, no crash). In prod it comes from the host via scp.
+      - ../ai-service/image_dir:/greener/image_dir:ro
+      # Poids du modele : suivis en git-lfs la-bas, donc `git lfs pull` d'abord, sinon le
+      # repertoire ne contient qu'un pointeur et le chargement echoue.
+      - ../ai-service/models:/greener/models:ro
       - ai_models:/root/.cache/huggingface
     expose:
       - "8443"

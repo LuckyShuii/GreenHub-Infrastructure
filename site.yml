@@ -29,6 +29,8 @@
       tags: [backups]
     - role: firewall
       tags: [firewall]
+    - role: maintenance
+      tags: [maintenance]
     - role: monitoring
       tags: [monitoring]
     - role: openvpn

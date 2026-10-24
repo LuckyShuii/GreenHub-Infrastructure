@@ -1,6 +1,73 @@
 ---
-# firewall role — valid stub. Real logic lands in a dedicated ticket.
-# The debug task is a no-op: stays "ok", never "changed" (idempotent).
-- name: Placeholder (no action)
-  ansible.builtin.debug:
-    msg: "Role {{ ansible_role_name }}: stub — nothing to do yet."
+# UFW: deny incoming by default, allow outgoing, open only what the Internet needs.
+# No explicit "deny 22" rule: the default policy already drops it (nmap reports filtered),
+# and an explicit deny would have to be ordered before the VPN allow, which `insert`
+# cannot do on an empty ruleset.
+
+# Lockout guard: with SSH restricted to the VPN, applying the rules on a host where the VPN
+# interface does not exist cuts off every admin, including this playbook's next run.
+- name: Refuse VPN-only SSH while the VPN interface is missing
+  ansible.builtin.assert:
+    that:
+      - firewall_vpn_interface in ansible_facts.interfaces
+    fail_msg: >-
+      firewall_ssh_vpn_only is true but interface {{ firewall_vpn_interface }} does not
+      exist on {{ inventory_hostname }}. Deploy OpenVPN first (SCRUM-58), or keep
+      firewall_ssh_vpn_only false for this inventory.
+    quiet: true
+  when: firewall_ssh_vpn_only | bool
+
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Set default incoming policy to deny
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Set default outgoing policy to allow
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Allow SSH through the VPN interface
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_ssh_port }}"
+    proto: tcp
+    interface_in: "{{ firewall_vpn_interface }}"
+
+# Present while the VPN is not deployed, removed as soon as firewall_ssh_vpn_only flips.
+- name: Allow SSH from the Internet until the VPN is in place
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_ssh_port }}"
+    proto: tcp
+    delete: "{{ firewall_ssh_vpn_only | bool }}"
+
+- name: Allow HTTPS from the Internet
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_https_port }}"
+    proto: tcp
+
+- name: Allow OpenVPN from the Internet
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_openvpn_port }}"
+    proto: udp
+
+- name: Allow HTTP for redirects and ACME
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_http_port }}"
+    proto: tcp
+    delete: "{{ not (firewall_http_enabled | bool) }}"
+
+# Last, so SSH is already allowed when the policy starts applying. The current session
+# survives either way: UFW keeps established connections.
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled

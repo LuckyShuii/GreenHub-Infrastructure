@@ -1,0 +1,58 @@
+---
+# Disk upkeep: the two things that filled this host are untagged images left by each
+# deploy, and a build cache nothing reads.
+
+- name: Install the prune script
+  ansible.builtin.copy:
+    src: greener-docker-prune.sh
+    dest: "{{ maintenance_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+    validate: "bash -n %s"
+
+- name: Install the prune units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: greener-docker-prune.service.j2
+      dest: "{{ maintenance_unit }}.service"
+    - src: greener-docker-prune.timer.j2
+      dest: "{{ maintenance_unit }}.timer"
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Reload systemd for maintenance
+
+- name: Enable the prune timer
+  ansible.builtin.systemd:
+    name: "{{ maintenance_unit }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - maintenance_enabled | bool
+    # A dry run never writes the unit, and systemd fails on one it cannot find.
+    - not ansible_check_mode
+
+- name: Create the journald drop-in directory
+  ansible.builtin.file:
+    path: "{{ maintenance_journald_dropin_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# A drop-in rather than journald.conf itself: the distro file stays untouched and the whole
+# of our policy is one readable file.
+- name: Bound the system journal
+  ansible.builtin.template:
+    src: journald.conf.j2
+    dest: "{{ maintenance_journald_dropin_dir }}/{{ maintenance_journald_dropin }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart journald

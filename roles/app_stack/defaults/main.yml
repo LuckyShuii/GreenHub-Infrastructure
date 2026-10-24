@@ -10,8 +10,16 @@ app_stack_services: []
 # Artifacts belong to the non-human CD account so the recurring deploy (deploy.yml, run
 # locally as `deploy`) re-renders them without root. Modes stay world-readable: the bind
 # mounts are read by container uids, not by `deploy`.
+# Le groupe est greener (et non deploy) pour que les devs lisent la configuration deployee
+# sans root : /opt/greener, les artefacts rendus, et le .env du role backend, qui partage
+# cette valeur — si les deux roles divergeaient, ils se renverraient le groupe du repertoire
+# a chaque run. Les modes, eux, ne donnent PAS l'ecriture au groupe : Ansible reste le seul
+# a ecrire ici, un fichier rendu remplace a la main etant exactement la derive que la regle
+# "rien a la main sur le serveur" interdit.
+# /opt/greener/ansible reste en dehors : il appartient au role webhook, et son groupe
+# commande aussi le fichier hooks.json, qui porte le jeton du webhook de deploiement.
 app_stack_owner: deploy
-app_stack_group: deploy
+app_stack_group: greener
 
 app_stack_dir: /opt/greener
 app_stack_env_file: "{{ app_stack_dir }}/.env"
@@ -61,6 +69,33 @@ app_stack_gateway_publish: "127.0.0.1:8080"
 
 app_stack_pg_data_volume: pg_data
 app_stack_ai_models_volume: ai_models
+
+# Reference-image dataset the AI service indexes at startup (one sub-directory per label).
+# A BIND MOUNT, not a named volume, and deliberately so: it is content, it does not ship in
+# the image, and it is refreshed by hand with scp between deploys — a named volume would put
+# it out of reach of a plain `scp`. Group-writable by greener + setgid so an admin can upload
+# over the VPN without root and the uploaded files keep the group; the container mounts it
+# read-only.
+# Same basename as IMAGE_DIR on purpose: host path and container path read alike, and the
+# dataset that is already on the VPS stays where it is.
+app_stack_ai_image_dir: "{{ app_stack_dir }}/image_dir"
+# Duplicated from the common role rather than read from it: common runs in another play,
+# so its defaults are out of scope here (same rule as backups_dir_group).
+app_stack_dataset_group: greener
+# Where that mount lands in the container: IMAGE_DIR (ai_image_dir, "./image_dir") resolved
+# against the AI image's WORKDIR /greener. Keep the two in sync.
+app_stack_ai_image_mount: "/greener/image_dir"
+# Poids du modele d'embedding. Bind mount lui aussi, et pour la meme raison que le dataset :
+# les .safetensors sont suivis en git-lfs dans le depot IA, donc le COPY du dockerfile ne met
+# dans l'image qu'un pointeur lfs si le checkout CI ne tire pas lfs. Les poids sont deposes a
+# la main sur le VPS, le conteneur les lit en read-only.
+# NE PAS confondre avec app_stack_ai_models_volume ci-dessus : celui-la est le cache HF.
+app_stack_ai_models_dir: "{{ app_stack_dir }}/models"
+# EMBEDDING_MODEL_DIR (ai_model_dir, "./models") resolu depuis le WORKDIR /greener de l'image.
+# Le service attend un sous-repertoire par modele, nomme d'apres EMBEDDING_MODEL_NAME dont le
+# "/" devient "--" (facebook/dinov2-large -> facebook--dinov2-large).
+app_stack_ai_models_mount: "/greener/models"
+
 # Holds the indexed vectors: without it every restart re-downloads and re-embeds the
 # reference images of all 114 items (many minutes, and the API does not answer meanwhile).
 app_stack_qdrant_storage_volume: qdrant_storage
@@ -101,3 +136,10 @@ app_stack_mem_limits:
   backend: 1g
   qdrant: 1536m
   ai: 5g
+
+# --- Container logs ------------------------------------------------------------------------
+# Same values as the daemon-wide cap, pinned per service in the compose file: dockerd reads
+# its log policy at container creation and only applies a changed one after a restart, so a
+# container created in between would keep an unlimited log.
+app_stack_log_max_size: "10m"
+app_stack_log_max_file: "3"

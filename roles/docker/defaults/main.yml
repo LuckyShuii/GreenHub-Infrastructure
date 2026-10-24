@@ -27,21 +27,18 @@ docker_managed_users: []
 docker_sdk_packages:
   - python3-docker
 
-# --- Container log rotation (SCRUM-129) ---------------------------------------------------
+# --- Container log rotation  ---------------------------------------------------
 # Docker's json-file driver rotates NOTHING by default: a container's log grows until the
-# disk is full, and this host is already at 77% of 77 GB. The cap is set on the DAEMON, not
-# per compose service, so it also covers containers this repo does not render (the
-# monitoring stack, anything started by hand) — one place, no way to forget a service.
+# disk is full. This daemon-wide cap covers containers this repo does not render (anything
+# started by hand); the compose files pin the same values per service, because dockerd
+# applies a CHANGED policy only to containers created after a daemon RESTART, and the
+# handler below deliberately only reloads. See the README.
 #
-# 10 MB x 3 files = at most 30 MB of live log per container, which is roughly a day of the
-# busiest one. That is the SHORT-TERM buffer, deliberately: history lives in Loki with its
-# own retention, and `docker logs` is only what you read before Grafana is open.
+# 10 MB x 3 files = at most 30 MB of live log per container, roughly a day of the busiest
+# one. History lives in Loki with its own retention.
 #
-# TWO THINGS TO KNOW. The daemon reads these at CONTAINER CREATION, so the reload below
-# applies them to containers created afterwards — the ones running now keep their unlimited
-# setting until their next recreation (any deploy does it). And this file is the whole
-# daemon configuration: anything else added to dockerd's config belongs in the template, not
-# in a second file.
+# This file is the whole daemon configuration: anything else dockerd needs belongs in the
+# template, not in a second file.
 docker_daemon_config: /etc/docker/daemon.json
 docker_log_driver: json-file
 docker_log_max_size: "10m"

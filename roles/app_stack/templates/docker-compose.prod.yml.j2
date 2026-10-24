@@ -1,14 +1,24 @@
 # {{ ansible_managed }} — rendered by the app_stack role, do not edit on the host.
-# ${DB_*} is interpolated by compose from {{ app_stack_env_file }} (0600), so no secret lands here.
+# ${DB_*} is interpolated by compose from {{ app_stack_env_file }} (0640 deploy:greener), so no
+# secret lands here.
 #
 # Every service carries a mem_limit (see app_stack_mem_limits). Two reasons, and the
 # second one is the important one: it lets the monitoring role alert on a share of each
 # container's own limit, and it makes the kernel kill the container that actually leaks
 # instead of whichever one it finds first — which, unbounded, could be Postgres.
+# Each service carries the same bounded json-file logging: the daemon-wide cap only reaches
+# containers created after the daemon was last restarted, so the limit is pinned here too.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "{{ app_stack_log_max_size }}"
+    max-file: "{{ app_stack_log_max_file }}"
+
 services:
   gateway:
     image: {{ app_stack_gateway_image }}
     restart: unless-stopped
+    logging: *logging
     mem_limit: {{ app_stack_mem_limits.gateway }}
     depends_on:
       backend:
@@ -26,6 +36,7 @@ services:
   postgres:
     image: {{ app_stack_postgres_image }}
     restart: unless-stopped
+    logging: *logging
     mem_limit: {{ app_stack_mem_limits.postgres }}
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -46,6 +57,7 @@ services:
   backend:
     image: {{ app_stack_backend_image }}
     restart: unless-stopped
+    logging: *logging
     mem_limit: {{ app_stack_mem_limits.backend }}
     depends_on:
       postgres:
@@ -67,10 +79,11 @@ services:
   qdrant:
     image: {{ app_stack_qdrant_image }}
     restart: unless-stopped
+    logging: *logging
     mem_limit: {{ app_stack_mem_limits.qdrant }}
     environment:
       QDRANT__SERVICE__HTTP_PORT: "{{ qdrant_port }}"
-      QDRANT__LOG_LEVEL: "{{ ai_log_level }}"
+      QDRANT__LOG_LEVEL: "{{ qdrant_log_level }}"
     expose:
       - "{{ qdrant_port }}"
     volumes:
@@ -88,6 +101,7 @@ services:
   ai:
     image: {{ app_stack_ai_image }}
     restart: unless-stopped
+    logging: *logging
     mem_limit: {{ app_stack_mem_limits.ai }}
     depends_on:
       qdrant:
@@ -98,6 +112,8 @@ services:
       - "{{ ai_port }}"
     volumes:
       - {{ app_stack_ai_models_volume }}:/root/.cache/huggingface
+      - {{ app_stack_ai_image_dir }}:{{ app_stack_ai_image_mount }}:ro
+      - {{ app_stack_ai_models_dir }}:{{ app_stack_ai_models_mount }}:ro
     networks:
       - greener_internal
     # Stopgap TCP check until the AI service exposes /health. Its startup indexing runs

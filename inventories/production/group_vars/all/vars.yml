@@ -8,3 +8,7 @@ caddy_domain: "lucasboillot.fr"
 # V1 single-VPS: this env is the real prod, so use Let's Encrypt PROD ACME for
 # browser-trusted certs. The role default stays staging (rate-limit safety net).
 caddy_acme_staging: false
+
+# OpenVPN is still a stub (SCRUM-58) and Ansible reaches the VPS on its public IP, so SSH
+# must stay open from the Internet for now. Flip to true once tun0 exists on the host.
+firewall_ssh_vpn_only: false

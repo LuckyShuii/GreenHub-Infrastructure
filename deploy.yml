@@ -24,6 +24,10 @@
     # default.
     app_stack_backend_version: "{{ deploy_version if deploy_service == 'backend' else '' }}"
     app_stack_ai_version: "{{ deploy_version if deploy_service == 'ai' else '' }}"
+    # Duplicated from the maintenance role rather than read from it: that role provisions
+    # with sudo and has no business in a deploy run that deliberately has none.
+    deploy_prune_script: /usr/local/bin/greener-docker-prune
+    deploy_prune_builder_keep: "168h"
 
   pre_tasks:
     # The daemon already rejects a malformed request with a 403, but the playbook must not
@@ -99,6 +103,33 @@
       tags: [app_stack]
 
   post_tasks:
+    # Moving a `*-latest` tag to the new image leaves the old one untagged, and the AI image
+    # weighs ~12 GB — four deploys would fill the disk. Pruned here, where the orphan is
+    # created; the weekly timer is only the safety net.
+    #
+    # Never fatal: the deployment already succeeded by this point, and the webhook reads
+    # this playbook's exit code.
+    - name: Supprimer les images orphelines laissées par le déploiement
+      ansible.builtin.command: >-
+        {{ deploy_prune_script }} --builder-keep {{ deploy_prune_builder_keep }}
+      register: deploy_prune
+      changed_when: false
+      failed_when: false
+
+    - name: Rapporter l'espace récupéré
+      ansible.builtin.debug:
+        msg: "{{ deploy_prune.stdout | default('') | trim }}"
+      when: deploy_prune.rc | default(1) == 0
+
+    # Reported, not raised: silence would hide a prune that has not run for weeks, and the
+    # only symptom would be a disk nobody is watching.
+    - name: Signaler un nettoyage en échec
+      ansible.builtin.debug:
+        msg: >-
+          Le nettoyage des images a échoué (rc {{ deploy_prune.rc | default('n/a') }}).
+          Le déploiement est inchangé ; vérifier greener-docker-prune sur le VPS.
+      when: deploy_prune.rc | default(1) != 0
+
     # A deploy marker on every dashboard. The first question of every incident is "did this
     # start after a deploy?", and answering it by cross-reading two tools is exactly the
     # kind of friction that makes people not answer it at all.

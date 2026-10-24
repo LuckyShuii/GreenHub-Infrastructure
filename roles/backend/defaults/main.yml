@@ -7,9 +7,21 @@ backend_app_dir: /opt/greener
 backend_env_path: "{{ backend_app_dir }}/.env"
 
 # Owned by the non-human CD account: the recurring deploy re-renders this file locally as
-# `deploy`, without root. 0600 still keeps it to that account (and root).
+# `deploy`, without root. Le GROUPE est greener, pour que les devs puissent lire ce qui est
+# deploye sans passer par root — meme valeur que app_stack_group, sinon les deux roles se
+# renverraient le groupe de /opt/greener a chaque run.
+# Pourquoi le .env s'ouvre en lecture au groupe : tous les comptes greener sont aussi dans le
+# groupe docker (group_vars/all/users.yml), donc ils pouvaient deja lire ce fichier via un
+# conteneur montant /opt/greener. Le 0600 ne leur interdisait rien, il les forcait a ce
+# detour au lieu d'un cat. Reste ferme a qui n'a ni compte greener ni acces docker.
+# Duplique du role common plutot que lu chez lui : common tourne dans un autre play, ses
+# defaults sont hors scope ici (meme regle que app_stack_dataset_group).
 backend_env_owner: deploy
-backend_env_group: deploy
+backend_env_group: greener
+
+# Lecture seule pour le groupe : le fichier porte db_password, et Ansible doit rester le seul
+# a l'ecrire.
+backend_env_file_mode: "0640"
 
 # Non-secret DB connection params. "postgres" = compose service name (resolvable by the
 # app container on the compose network). Override per env in inventories/<env>/ if needed.

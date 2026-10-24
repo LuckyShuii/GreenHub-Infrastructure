@@ -1,2 +1,11 @@
 ---
-# Default vars for the firewall role (to be filled).
+# UFW policy for the public host. HTTP stays enabled for Caddy redirects and ACME.
+firewall_ssh_port: "22"
+firewall_vpn_interface: tun0
+# true: SSH only through firewall_vpn_interface (the role refuses to run if it is missing).
+# false: SSH also open from the Internet — bootstrap only, until OpenVPN is deployed.
+firewall_ssh_vpn_only: true
+firewall_http_enabled: true
+firewall_http_port: "80"
+firewall_https_port: "443"
+firewall_openvpn_port: "1194"
