@@ -285,6 +285,27 @@ loki.process "journal" {
     }
   }
 
+  // The prune job writes journald priority prefixes, so this unit is the one case where the
+  // level is already correct in the journal. Re-matched on the text anyway: the pipeline
+  // stamps every journal line `info` above, and reading the priority back instead would mean
+  // relabelling `level` for all units — including the ones whose real level is inside the
+  // line, not in the entry's metadata.
+  stage.match {
+    selector = `{service="greener-docker-prune"} |~ "ABNORMAL"`
+
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+
+  stage.match {
+    selector = `{service="greener-docker-prune"} |~ "prune FAILED"`
+
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+
   // The Docker daemon's own level prefix, e.g. `level=error msg="..."`.
   stage.match {
     selector = `{service="docker"} |~ "level=warning"`

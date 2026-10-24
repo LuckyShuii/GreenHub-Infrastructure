@@ -177,6 +177,9 @@ monitoring_journal_units:
   # panel of the backup row on the PostgreSQL dashboard is empty by construction.
   - greener-db-backup.service
   - greener-db-sync.service
+  # Same reasoning as the dump: the prune job reports only to journald, so without this line
+  # a failed or abnormally large cleanup is traceable on the host and nowhere else.
+  - greener-docker-prune.service
   - greener-webhook.service
   - docker.service
 
