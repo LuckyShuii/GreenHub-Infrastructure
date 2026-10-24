@@ -38,6 +38,24 @@
     # A dry run never writes the unit, and systemd fails on one it cannot find.
     - not ansible_check_mode
 
+# Nothing in this repo installs logrotate, and a minimal image does not always carry it —
+# at which point the text logs under /var/log have no rotation at all. The distro's own
+# rules are left exactly as they ship; only their presence is asserted.
+- name: Ensure logrotate is installed
+  ansible.builtin.apt:
+    name: "{{ maintenance_logrotate_packages }}"
+    state: present
+    cache_valid_time: 3600
+
+- name: Enable the logrotate timer
+  ansible.builtin.systemd:
+    name: "{{ maintenance_logrotate_timer }}"
+    enabled: true
+    state: started
+  # Same reason as the prune timer: on a fresh host a dry run has not installed the package
+  # that ships this unit, and systemd fails on a unit it cannot find.
+  when: not ansible_check_mode
+
 - name: Create the journald drop-in directory
   ansible.builtin.file:
     path: "{{ maintenance_journald_dropin_dir }}"

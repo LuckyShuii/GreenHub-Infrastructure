@@ -67,11 +67,15 @@ one is already correct then. The compose service name becomes the `service` labe
 
 ### Native services: an allow-list on the unit
 
-Caddy, the CD webhook and the Docker daemon have no container to read, so they come from
-the **systemd journal** (persistent, under `/var/log/journal`). Same allow-list shape, for
-a different reason: on a VPS whose SSH is still reachable from the internet, most of the
-journal is `sshd` refusing scans. `monitoring_journal_units` is the list; adding one is a
-one-line change.
+Caddy, the CD webhook, the Docker daemon and the systemd-timer jobs (the two backup units
+and the Docker prune) have no container to read, so they come from the **systemd journal**
+(persistent, under `/var/log/journal`). Same allow-list shape, for a different reason: on a
+VPS whose SSH is still reachable from the internet, most of the journal is `sshd` refusing
+scans. `monitoring_journal_units` is the list; adding one is a one-line change.
+
+A oneshot job whose only output is journald is invisible in Grafana until its unit is on
+that list — which is the whole point of putting it there, since its failures have no other
+trace.
 
 `caddy.service` is relabelled to `caddy`, so a native service reads exactly like a
 containerised one and a single dashboard query covers both. `source` (`docker` /

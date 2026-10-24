@@ -7,4 +7,10 @@ Wants=docker.service
 
 [Service]
 Type=oneshot
-ExecStart={{ maintenance_script }} --builder-keep {{ maintenance_builder_keep }}
+ExecStart={{ maintenance_script }} \
+    --builder-keep {{ maintenance_builder_keep }} \
+    --warn-above {{ maintenance_reclaim_warn_mib }}
+# systemd's default, pinned because the script's whole reporting scheme rests on it: the
+# `<4>` / `<3>` prefixes it writes are read off the line by journald and become the entry's
+# priority, instead of being logged as literal text at info like everything else.
+SyslogLevelPrefix=yes
