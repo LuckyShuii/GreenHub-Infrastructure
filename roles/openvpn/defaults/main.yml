@@ -41,7 +41,9 @@ openvpn_nonlocal_bind: true
 #     telling the client to reach the VPN through the VPN connects to nothing;
 #   - NOT caddy_domain either: the apex may well point somewhere other than this VPS
 #     (it does in production), so inherit it and clients dial a host with no OpenVPN on it.
-# A dedicated `vpn.<domain>` record is the right answer; set it per environment.
+# A dedicated `vpn.<domain>` record is the right answer, pointing at the VPS's PUBLIC
+# address: clients dial this before the tunnel exists, so a name resolving to the VPN
+# address would be unreachable for everyone.
 openvpn_remote_host: "vpn.{{ caddy_domain }}"
 
 # EC rather than RSA: it also removes the build-dh step entirely.

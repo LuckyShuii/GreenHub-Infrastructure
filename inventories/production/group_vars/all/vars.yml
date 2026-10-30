@@ -10,7 +10,9 @@ caddy_domain: "lucasboillot.fr"
 caddy_acme_staging: false
 
 # The apex lucasboillot.fr resolves to another host (145.239.37.162), not this VPS, so the
-# clients dial the VPS directly until a vpn.lucasboillot.fr record exists. Replace this with
-# "vpn.lucasboillot.fr" the day it does — and re-run `make vpn-profiles`, since the embedded
-# address changes every client profile.
+# clients dial the VPS directly. A `vpn.lucasboillot.fr` A record pointing at THIS PUBLIC
+# IP would replace it — the point being that a name survives a change of IP, where this
+# literal is baked into all seven client profiles. Re-run `make vpn-profiles` after any
+# change here. Never point that record at 10.8.0.1: clients resolve it before the tunnel
+# exists.
 openvpn_remote_host: "51.255.169.129"
