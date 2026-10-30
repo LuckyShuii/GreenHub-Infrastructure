@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+# Shared half of a profile; greener-vpn-profile appends the key material.
+client
+dev tun
+proto {{ openvpn_proto }}
+remote {{ openvpn_remote_host }} {{ openvpn_port }}
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+# Refuses a server not holding a certificate from our CA.
+remote-cert-tls server
+data-ciphers AES-256-GCM
+data-ciphers-fallback AES-256-GCM
+auth SHA256
+tls-version-min 1.2
+verb 3

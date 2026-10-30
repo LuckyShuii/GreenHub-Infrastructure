@@ -5,6 +5,12 @@
 
 common_timezone: "Europe/Paris"
 
+# VPN addressing. Shared because two roles need the same answer: openvpn serves this subnet,
+# monitoring publishes Grafana on the server's address inside it.
+vpn_subnet: "10.8.0.0"
+vpn_netmask: "255.255.255.0"
+vpn_server_ip: "10.8.0.1"
+
 # No ansible_user on purpose: with remote_user unset Ansible lets the SSH client pick the
 # account, so each operator connects with their own nominative users.yml account via their
 # ~/.ssh/config and sudo stays traceable per person. Fresh VPS, before `common` has created
@@ -22,6 +28,11 @@ grafana_admin_password: "{{ vault_grafana_admin_password }}"
 # requires a copy kept outside git.
 backup_gpg_passphrase: "{{ vault_backup_gpg_passphrase }}"
 grafana_user_passwords: "{{ vault_grafana_user_passwords }}"
+# Passphrase protecting the OpenVPN CA private key. Unlike the others this one guards a
+# SIGNING key: whoever holds the key and this passphrase can mint a certificate for the VPN.
+# The key itself stays on the host (0600 root, never in git) and this is handed to easy-rsa
+# only for the duration of a signature.
+openvpn_ca_passphrase: "{{ vault_openvpn_ca_passphrase }}"
 # Anyone holding this URL can post in the alert channel, so it is a secret like the
 # rest: encrypted per env, rendered only into the 0600 Grafana env file.
 discord_alert_webhook: "{{ vault_discord_alert_webhook }}"
@@ -61,22 +72,17 @@ dockerhub_pull_token: "{{ vault_dockerhub_pull_token }}"
 deploy_webhook_token: "{{ vault_deploy_webhook_token }}"
 deploy_version_pattern: "^([0-9a-f]{7,40}|latest)$"
 
-# Observability. The Grafana container binds the loopback only; this toggle decides whether
+# Observability. Grafana is reachable on the VPN address only; this toggle decides whether
 # Caddy ALSO publishes it at grafana.<caddy_domain>.
 #
-# DECISION (LBT, 2026-09-17, SCRUM-133): it stays ON until OpenVPN is configured
-# (SCRUM-58). Requiring an SSH tunnel from seven people for every look at a dashboard is
-# not workable during development, so this exposure is an ACCEPTED risk, not an oversight.
-# The compensating controls are listed in roles/monitoring/README.md. The residual risk
-# none of them covers is a Grafana CVE reachable from the internet — only the network
-# restriction fixes that.
+# DECISION (LBT, 2026-10-24): OFF now that the VPN is deployed. It was on as an accepted risk
+# while asking seven people for an SSH tunnel on every dashboard was the only alternative;
+# the VPN removes that trade-off, and with it the residual risk no compensating control
+# covered — a Grafana CVE reachable from the internet.
 #
-# Condition to lift: SCRUM-58 (VPN). Binding Grafana to the VPN address and deleting this
-# variable is part of that ticket — SCRUM-129 was narrowed to the log sources and closed.
-# While on, it needs a DNS record for grafana.<caddy_domain>.
-# Shared here because caddy (the vhost) and monitoring (root URL + hardening) both need the
-# same answer.
-grafana_public: true
+# Turning it back on needs a DNS record for grafana.<caddy_domain> and re-reading the
+# hardening notes in roles/monitoring/README.md.
+grafana_public: false
 
 # AI service: names/values mirror the ai-service repo (.env.example + configs.py).
 # The old AI_PIPELINE_MODEL_NAME (image-classification pipeline) is gone: the service now

@@ -1,0 +1,27 @@
+---
+# easy-rsa is driven by environment only: no rendered `vars` file to drift on the host.
+#
+# EASYRSA_REQ_CN is deliberately NOT here: build-client-full and build-server-full REFUSE to
+# run when it is set ("does not support setting an external commonName"), so it belongs to
+# build-ca alone.
+openvpn_easyrsa_env:
+  EASYRSA_PKI: "{{ openvpn_pki_dir }}"
+  EASYRSA_BATCH: "1"
+  EASYRSA_ALGO: "{{ openvpn_easyrsa_algo }}"
+  EASYRSA_CURVE: "{{ openvpn_easyrsa_curve }}"
+  EASYRSA_DIGEST: "{{ openvpn_easyrsa_digest }}"
+  EASYRSA_CA_EXPIRE: "{{ openvpn_ca_expire_days }}"
+  EASYRSA_CERT_EXPIRE: "{{ openvpn_cert_expire_days }}"
+  EASYRSA_CRL_DAYS: "{{ openvpn_crl_days }}"
+
+# Signing only reads the CA key, so it gets PASSIN alone.
+openvpn_easyrsa_ca_in:
+  EASYRSA_PASSIN: "pass:{{ openvpn_ca_passphrase }}"
+
+# build-ca needs BOTH passphrase vars, or it prompts: easy-rsa treats one without the other
+# as "no passphrase supplied" and falls through to an interactive read whose loop never ends
+# on EOF — it reprompts forever.
+openvpn_easyrsa_ca_build:
+  EASYRSA_REQ_CN: "{{ openvpn_ca_cn }}"
+  EASYRSA_PASSIN: "pass:{{ openvpn_ca_passphrase }}"
+  EASYRSA_PASSOUT: "pass:{{ openvpn_ca_passphrase }}"

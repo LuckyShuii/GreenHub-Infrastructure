@@ -29,7 +29,9 @@ roles/
   monitoring/                    # REAL: centralised logs (Loki + Alloy + Grafana), own compose project
   webhook/                       # REAL: CD receiver (adnanh/webhook) + the local deploy tooling
   firewall/                      # REAL: ufw default-deny, 443/1194 (+80) open, SSH VPN-only
-  ssh/ openvpn/ backups/                         # valid stubs
+  openvpn/                       # REAL: VPN + own CA, client certs driven by users.yml
+  backups/                       # REAL: nightly pg_dump, gpg, off-site copy to Drive
+  ssh/                                           # valid stub
 ```
 
 ## Prerequisites
@@ -155,17 +157,21 @@ journal. The synthetic generator that stood in while nothing was running has bee
 and its code deleted. Metrics come from a node and a cAdvisor exporter running inside Alloy,
 stored by a Prometheus that scrapes nothing but itself.
 
-**Access is still provisional.** No VPN yet, so Grafana publishes on `127.0.0.1:3000` and
-Caddy stays the only host-facing service. Reach it through a tunnel:
+**Grafana is behind the VPN.** It publishes on `10.8.0.1:3000` (the VPN address) and on the
+loopback, never on `0.0.0.0` — Docker bypasses UFW. Connect to the VPN, then:
+
+```
+http://10.8.0.1:3000
+```
+
+The public vhost (`grafana_public`) is **off**: it had been on as an accepted risk while an
+SSH tunnel for seven people was the only alternative, and the VPN removes that trade-off
+along with the residual risk no compensating control covered. The loopback publish stays as
+the break-glass path when the VPN itself is the thing that is broken:
 
 ```bash
 ssh -L 3000:127.0.0.1:3000 lboillot@<vps>   # then http://localhost:3000
 ```
-
-A public vhost sits behind `grafana_public` (`group_vars/all/vars.yml`) and is currently
-**on** — an accepted risk, with the compensating controls listed in
-`roles/monitoring/README.md`. Binding Grafana to the VPN address instead belongs to
-SCRUM-58.
 
 ```bash
 ansible-playbook -i inventories/production/hosts.yml site.yml --tags monitoring

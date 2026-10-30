@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: openvpn
   author: GREENER infra
-  description: "OpenVPN server (least-privilege access to the VPS) (stub)."
+  description: "OpenVPN server with its own CA; client certificates driven by users.yml."
   license: MIT
   min_ansible_version: "2.15"
   platforms:
