@@ -9,6 +9,8 @@ caddy_domain: "lucasboillot.fr"
 # browser-trusted certs. The role default stays staging (rate-limit safety net).
 caddy_acme_staging: false
 
-# OpenVPN is still a stub (SCRUM-58) and Ansible reaches the VPS on its public IP, so SSH
-# must stay open from the Internet for now. Flip to true once tun0 exists on the host.
-firewall_ssh_vpn_only: false
+# The apex lucasboillot.fr resolves to another host (145.239.37.162), not this VPS, so the
+# clients dial the VPS directly until a vpn.lucasboillot.fr record exists. Replace this with
+# "vpn.lucasboillot.fr" the day it does — and re-run `make vpn-profiles`, since the embedded
+# address changes every client profile.
+openvpn_remote_host: "51.255.169.129"

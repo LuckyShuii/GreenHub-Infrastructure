@@ -1,2 +1,63 @@
 ---
-# Default vars for the openvpn role (to be filled).
+# The PKI lives on the host: the CA private key is never versioned, only its passphrase is.
+openvpn_enabled: true
+
+openvpn_packages:
+  - openvpn
+  - easy-rsa
+
+openvpn_instance: greener
+openvpn_service: "openvpn-server@{{ openvpn_instance }}"
+
+openvpn_dir: /etc/openvpn
+openvpn_server_dir: /etc/openvpn/server
+openvpn_easyrsa_bin: /usr/share/easy-rsa/easyrsa
+openvpn_easyrsa_dir: /etc/openvpn/easy-rsa
+openvpn_pki_dir: /etc/openvpn/easy-rsa/pki
+openvpn_clients_dir: /etc/openvpn/clients
+
+openvpn_port: 1194
+
+# Two values, and they must differ. `udp` opens an IPv4-only socket, so a client whose
+# resolver answers AAAA first reaches a port nothing listens on; `udp6` opens an AF_INET6
+# socket that Linux also serves IPv4 through (bindv6only=0), so one socket covers both.
+# The client keeps `udp` and picks whichever family its network offers.
+openvpn_server_proto: udp6
+openvpn_proto: udp
+
+# Pinned, and must equal firewall_vpn_interface: the firewall opens SSH on this one only.
+openvpn_interface: tun0
+
+# Shared with monitoring, which publishes Grafana on vpn_server_ip (group_vars/all).
+openvpn_subnet: "{{ vpn_subnet }}"
+openvpn_netmask: "{{ vpn_netmask }}"
+
+# Lets a container publish on the VPN address before the tunnel is up — after a reboot
+# dockerd starts first, and without this Grafana's bind fails and it never comes back.
+openvpn_nonlocal_bind: true
+
+# The address clients dial. Two traps, hence no derivation from anything existing:
+#   - NOT ansible_host: it becomes the VPN address once SSH goes VPN-only, and a profile
+#     telling the client to reach the VPN through the VPN connects to nothing;
+#   - NOT caddy_domain either: the apex may well point somewhere other than this VPS
+#     (it does in production), so inherit it and clients dial a host with no OpenVPN on it.
+# A dedicated `vpn.<domain>` record is the right answer; set it per environment.
+openvpn_remote_host: "vpn.{{ caddy_domain }}"
+
+# EC rather than RSA: it also removes the build-dh step entirely.
+openvpn_easyrsa_algo: ec
+openvpn_easyrsa_curve: secp384r1
+openvpn_easyrsa_digest: sha256
+openvpn_ca_expire_days: 3650
+openvpn_cert_expire_days: 825
+# An expired CRL makes OpenVPN refuse every connection, revoked or not.
+openvpn_crl_days: 3650
+
+# Wall-clock bound on build-ca; a prompt it decides to show would otherwise hang the deploy.
+openvpn_easyrsa_timeout: 120
+
+openvpn_server_cn: "greener-vpn"
+openvpn_ca_cn: "GREENER VPN CA"
+
+# Gitignored: a .ovpn holds the client's private key.
+openvpn_fetch_dir: "./vpn-clients"

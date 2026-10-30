@@ -1,0 +1,47 @@
+---
+# Delivery, kept out of main.yml on purpose: a role-level tag is inherited by every task in
+# the role, so `tags: [never]` on a fetch task does NOT hold against `--tags openvpn` — the
+# profiles came down on a plain provisioning run. Reached through its own playbook instead,
+# which cannot be triggered by a provisioning replay at all.
+
+- name: Select the accounts that have a VPN certificate
+  ansible.builtin.set_fact:
+    openvpn_client_cns: >-
+      {{ system_users
+         | selectattr('state', 'eq', 'present')
+         | selectattr('vpn', 'defined')
+         | selectattr('vpn')
+         | map(attribute='name') | list }}
+
+# 0700 before anything lands in it: the directory is the only protection a .ovpn has between
+# the fetch and the chmod below.
+- name: Create the local delivery directory
+  ansible.builtin.file:
+    path: "{{ openvpn_fetch_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Fetch the client profiles
+  ansible.builtin.fetch:
+    src: "{{ openvpn_clients_dir }}/{{ item }}.ovpn"
+    dest: "{{ openvpn_fetch_dir }}/"
+    flat: true
+  loop: "{{ openvpn_client_cns }}"
+
+# fetch ACCEPTS `mode:` and silently ignores it — the files land 0644. These hold private
+# keys, so the mode is set explicitly rather than left to the controller's umask.
+- name: Restrict the fetched profiles
+  ansible.builtin.file:
+    path: "{{ openvpn_fetch_dir }}/{{ item }}.ovpn"
+    mode: "0600"
+  loop: "{{ openvpn_client_cns }}"
+  delegate_to: localhost
+  become: false
+
+- name: Report where the profiles landed
+  ansible.builtin.debug:
+    msg: >-
+      {{ openvpn_client_cns | length }} profile(s) in {{ openvpn_fetch_dir }}/ (0600).
+      Each one holds a private key: deliver it like a password, one recipient at a time.

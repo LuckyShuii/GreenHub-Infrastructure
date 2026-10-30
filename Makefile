@@ -14,7 +14,7 @@ CONNECT := $(if $(BOOTSTRAP),-e ansible_user=ubuntu)
 # come through a variable:  make deploy ENV=production ARGS="--tags backups"
 ARGS ?=
 
-.PHONY: deps lint check deploy ping vault-edit vault-rekey
+.PHONY: deps lint check deploy ping vpn-profiles vault-edit vault-rekey
 
 deps: ## Install pinned collections
 	ansible-galaxy collection install -r requirements.yml -p ./.ansible/collections
@@ -28,6 +28,9 @@ check: ## Dry-run against $(ENV) (no changes applied)
 
 deploy: ## Apply against $(ENV)
 	ansible-playbook -i $(INVENTORY) $(CONNECT) site.yml $(ARGS)
+
+vpn-profiles: ## Bring the OpenVPN client profiles back into ./vpn-clients (0600)
+	ansible-playbook -i $(INVENTORY) $(CONNECT) vpn-profiles.yml $(ARGS)
 
 ping: ## Connectivity check against $(ENV)
 	ansible -i $(INVENTORY) $(CONNECT) all -m ping

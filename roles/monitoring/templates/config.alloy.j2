@@ -306,6 +306,25 @@ loki.process "journal" {
     }
   }
 
+  // sshd: a refused attempt must not read as information. "Connection closed by
+  // authenticating user" is the pre-auth abort a failed key attempt produces, so it counts
+  // as a failure too — leaving it at info would hide most of them.
+  stage.match {
+    selector = `{service="ssh"} |~ "Failed (password|publickey)|Invalid user|Connection closed by (authenticating|invalid) user|Disconnected from authenticating user"`
+
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+
+  stage.match {
+    selector = `{service="ssh"} |~ "^error:|Unable to negotiate|maximum authentication attempts exceeded"`
+
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+
   // The Docker daemon's own level prefix, e.g. `level=error msg="..."`.
   stage.match {
     selector = `{service="docker"} |~ "level=warning"`

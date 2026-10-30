@@ -1,0 +1,14 @@
+---
+# Bring the client profiles back to the operator's machine. A deliberate, separate act: each
+# .ovpn holds a private key, so it must never ride along with a provisioning replay.
+#
+#   make vpn-profiles ENV=production
+
+- name: Deliver the OpenVPN client profiles
+  hosts: greener_vps
+  gather_facts: false
+  tasks:
+    - name: Fetch the profiles
+      ansible.builtin.include_role:
+        name: openvpn
+        tasks_from: fetch.yml

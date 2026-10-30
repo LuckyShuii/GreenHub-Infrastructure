@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# Assemble one client's .ovpn on the host, so its private key never reaches the controller.
+set -euo pipefail
+
+cn="${1:?usage: $0 <common-name>}"
+
+base="{{ openvpn_clients_dir }}/base.conf"
+pki="{{ openvpn_pki_dir }}"
+tls_crypt="{{ openvpn_server_dir }}/tls-crypt.key"
+out="{{ openvpn_clients_dir }}/${cn}.ovpn"
+
+cert="${pki}/issued/${cn}.crt"
+key="${pki}/private/${cn}.key"
+
+for f in "$base" "$cert" "$key" "${pki}/ca.crt" "$tls_crypt"; do
+	[ -f "$f" ] || { echo "missing ${f}" >&2; exit 1; }
+done
+
+tmp="$(mktemp "${out}.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+chmod 0600 "$tmp"
+
+# easy-rsa prepends a text dump to issued/*.crt and OpenVPN rejects the file with it.
+extract_cert() {
+	sed -n '/^-----BEGIN CERTIFICATE-----$/,/^-----END CERTIFICATE-----$/p' "$1"
+}
+
+{
+	cat "$base"
+	echo "<ca>"
+	extract_cert "${pki}/ca.crt"
+	echo "</ca>"
+	echo "<cert>"
+	extract_cert "$cert"
+	echo "</cert>"
+	echo "<key>"
+	cat "$key"
+	echo "</key>"
+	echo "<tls-crypt>"
+	cat "$tls_crypt"
+	echo "</tls-crypt>"
+} > "$tmp"
+
+# Compared by content, not by mtime: the profile and the shared options are written in the
+# same second on a first run, which no timestamp test can tell apart. This also catches a
+# re-issued certificate or a rotated tls-crypt key.
+if [ -f "$out" ] && cmp -s "$tmp" "$out"; then
+	echo "unchanged ${cn}"
+	exit 0
+fi
+
+mv "$tmp" "$out"
+trap - EXIT
+echo "built ${cn}"

@@ -18,3 +18,9 @@ collections/
 
 # Local Python virtualenv (ansible, ansible-lint, yamllint)
 .venv/
+
+# OpenVPN client profiles fetched with --tags vpn-fetch: each one holds a private key.
+vpn-clients/
+
+# macOS
+.DS_Store

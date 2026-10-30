@@ -6,9 +6,8 @@
 # SCRUM-129 wired the REAL sources: Alloy reads the application containers through the
 # Docker API and the native services (Caddy, the CD webhook) from the systemd journal. The
 # synthetic generator it replaced is off below and its teardown still runs.
-# Still provisional: Grafana publishes on LOOPBACK only and Caddy re-exposes it publicly
-# (grafana_public), because there is no VPN yet. Binding it to the VPN address belongs to
-# SCRUM-58, which has to land first — it is no longer part of SCRUM-129.
+# Grafana publishes on the VPN address for humans and on the loopback for this role's own
+# API calls; the public vhost (grafana_public) is off.
 
 monitoring_enabled: true
 
@@ -44,14 +43,20 @@ monitoring_grafana_port: 3000
 # Alloy's own UI/metrics endpoint; stays inside the compose network.
 monitoring_alloy_port: 12345
 
-# Grafana is the only service of this stack that publishes anything, and only on loopback,
-# so Caddy remains the single host-facing service. Reach it with an SSH tunnel:
-#   ssh -L 3000:127.0.0.1:3000 <user>@<vps>   then http://localhost:3000
-monitoring_grafana_publish: "127.0.0.1:{{ monitoring_grafana_port }}"
+# Grafana is the only service of this stack that publishes anything. Two addresses, on
+# purpose: the VPN one is how people reach it, the loopback one is how this role reaches its
+# API — and it must keep working when the VPN does not, or a broken VPN would also mean a
+# failed monitoring deploy and no dashboards to debug it with.
+monitoring_grafana_publish_addresses:
+  - "127.0.0.1"
+  - "{{ vpn_server_ip }}"
 
-# Public URL, used only when grafana_public is on (see group_vars/all/vars.yml). Grafana
-# needs to know its external origin or its redirects and asset links point at localhost.
-monitoring_grafana_root_url: "https://grafana.{{ caddy_domain }}/"
+# Where Grafana tells people it lives: the public vhost when there is one, the VPN address
+# otherwise. This is what the "View" link of an alert notification is built from.
+monitoring_grafana_root_url: >-
+  {{ 'https://grafana.' ~ caddy_domain ~ '/'
+     if (grafana_public | default(false) | bool)
+     else 'http://' ~ vpn_server_ip ~ ':' ~ monitoring_grafana_port ~ '/' }}
 
 monitoring_grafana_admin_user: admin
 
@@ -120,8 +125,7 @@ monitoring_container_health_max_age: 120
 # Queried through Grafana's datasource proxy rather than Prometheus directly: Prometheus
 # publishes no host port (only Grafana does), so this is the one door in from the host.
 monitoring_prometheus_query_api: >-
-  http://{{ monitoring_grafana_publish
-  }}/api/datasources/proxy/uid/prometheus/api/v1/query
+  {{ monitoring_grafana_api }}/api/datasources/proxy/uid/prometheus/api/v1/query
 
 # The queries that prove each exporter really ran. A healthy datasource only proves the
 # store answers; if the exporters are misconfigured Prometheus stays happy and every panel
@@ -169,8 +173,8 @@ monitoring_app_compose_project: greener
 monitoring_docker_refresh_interval: "15s"
 
 # Source 2: the systemd journal, for the services that run natively and have no container.
-# An allow-list again, for a different reason: on a VPS whose SSH is still public, most of
-# the journal is sshd refusing internet scans. Adding a unit here is a one-line change.
+# An allow-list: the journal also carries units nobody reads. Adding one is a one-line
+# change, and a unit missing from here is invisible in Grafana by construction.
 monitoring_journal_units:
   - caddy.service
   # The dump job: its only output is journald, so without this line the "logs associés"
@@ -180,6 +184,11 @@ monitoring_journal_units:
   # Same reasoning as the dump: the prune job reports only to journald, so without this line
   # a failed or abnormally large cleanup is traceable on the host and nowhere else.
   - greener-docker-prune.service
+  # Who connected to the VPN and who was refused: an auth failure has no other trace.
+  - openvpn-server@greener.service
+  # Collecté depuis que SSH est restreint au VPN : avant, le journal était saturé de scans
+  # Internet refusés. Désormais chaque ligne décrit une vraie tentative d'un membre.
+  - ssh.service
   - greener-webhook.service
   - docker.service
 
@@ -206,7 +215,7 @@ monitoring_wait_timeout: 300
 # (Admin | Editor | Viewer); no field means no Grafana account at all. Users are the one
 # thing Grafana cannot provision from files, so the role drives its admin API instead.
 monitoring_grafana_users_enabled: true
-monitoring_grafana_api: "http://{{ monitoring_grafana_publish }}"
+monitoring_grafana_api: "http://127.0.0.1:{{ monitoring_grafana_port }}"
 monitoring_grafana_org_id: 1
 # Grafana requires an email per account and uses it as a second unique key. Nothing is ever
 # sent to it (no SMTP configured), so a synthetic domain is honest: people sign in with

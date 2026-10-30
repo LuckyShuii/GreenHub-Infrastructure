@@ -140,11 +140,13 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
-{% if grafana_public | default(false) | bool %}
+      # Always set: Grafana builds the "View" link of every alert from it, and its default
+      # points at localhost — which would send the whole team to their own machine.
       GF_SERVER_ROOT_URL: "{{ monitoring_grafana_root_url }}"
-      # Compensating controls for as long as this instance answers from the internet
-      # (SCRUM-133). Conditional on purpose: behind the VPN they would be noise, and their
-      # presence is the signal that the exposure is still on.
+{% if grafana_public | default(false) | bool %}
+      # Compensating controls for as long as this instance answers from the internet.
+      # Conditional on purpose: behind the VPN they would be noise, and their presence is
+      # the signal that the exposure is still on.
       # Caddy already redirects HTTP to HTTPS, so marking the session cookie Secure costs
       # nothing and closes the downgrade case.
       GF_SECURITY_COOKIE_SECURE: "true"
@@ -159,10 +161,12 @@ services:
       - {{ monitoring_grafana_provisioning_dir }}:/etc/grafana/provisioning:ro
       - {{ monitoring_grafana_dashboards_dir }}:/var/lib/grafana/dashboards:ro
       - {{ monitoring_grafana_data_volume }}:/var/lib/grafana
-    # Loopback only — Caddy stays the single host-facing service. Reach it with
-    #   ssh -L {{ monitoring_grafana_port }}:{{ monitoring_grafana_publish }} <user>@<vps>
+    # The VPN address for people, the loopback for this role's own API calls. Never 0.0.0.0:
+    # Docker bypasses UFW, so that would publish Grafana on the internet.
     ports:
-      - "{{ monitoring_grafana_publish }}:{{ monitoring_grafana_port }}"
+{% for addr in monitoring_grafana_publish_addresses %}
+      - "{{ addr }}:{{ monitoring_grafana_port }}:{{ monitoring_grafana_port }}"
+{% endfor %}
     networks:
       - {{ monitoring_network }}
     healthcheck:

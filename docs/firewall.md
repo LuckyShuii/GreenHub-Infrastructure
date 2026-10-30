@@ -13,7 +13,7 @@ Détails techniques du rôle : [`roles/firewall/README.md`](../roles/firewall/RE
 | 443/tcp | Site web (HTTPS, Caddy) | Internet |
 | 80/tcp | Redirection HTTP → HTTPS et certificats (ACME) | Internet (`firewall_http_enabled`) |
 | 1194/udp | OpenVPN | Internet |
-| 22/tcp | SSH | VPN (`tun0`) **et** Internet tant que `firewall_ssh_vpn_only: false` |
+| 22/tcp | SSH | VPN (`tun0`) uniquement — l'accès Internet a été fermé. Historique : tant que `firewall_ssh_vpn_only: false` |
 | tout le reste | — | refusé |
 
 Le sortant est entièrement autorisé (mises à jour, images Docker, Discord…).
@@ -184,7 +184,15 @@ fois, le rôle n'est pas idempotent.
   ```yaml
   ansible_host: <IP-VPN-du-serveur>   # au lieu de 51.255.169.129
   ```
-  Puis vérifier :
+  **Et ajouter l'IP VPN à son `~/.ssh/config`**, sinon cette étape échoue en
+  `Permission denied (publickey)` : le dépôt laisse `remote_user` vide exprès, donc c'est le
+  client SSH qui résout le compte, et sans entrée il essaie le nom d'utilisateur local.
+  ```
+  Host lboillot greener-prod 10.8.0.1
+    HostName 10.8.0.1
+    User <ton-compte>
+  ```
+  **Chaque personne qui déploie doit faire cette modification chez elle.** Puis vérifier :
   ```bash
   make ping ENV=production
   ```

@@ -27,14 +27,18 @@
       tags: [app_stack]
     - role: backups
       tags: [backups]
+    # openvpn before firewall, out of alphabetical order: the firewall refuses to restrict
+    # SSH to the VPN while the VPN interface is missing, and this role is what creates it.
+    # Running it first is what makes the switch of docs/firewall.md §3 a single replay
+    # instead of two.
+    - role: openvpn
+      tags: [openvpn]
     - role: firewall
       tags: [firewall]
     - role: maintenance
       tags: [maintenance]
     - role: monitoring
       tags: [monitoring]
-    - role: openvpn
-      tags: [openvpn]
     - role: ssh
       tags: [ssh]
     - role: webhook

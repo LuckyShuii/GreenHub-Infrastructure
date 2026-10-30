@@ -1,0 +1,38 @@
+# {{ ansible_managed }}
+port {{ openvpn_port }}
+proto {{ openvpn_server_proto }}
+dev {{ openvpn_interface }}
+dev-type tun
+
+topology subnet
+server {{ openvpn_subnet }} {{ openvpn_netmask }}
+
+ca {{ openvpn_pki_dir }}/ca.crt
+cert {{ openvpn_pki_dir }}/issued/{{ openvpn_server_cn }}.crt
+key {{ openvpn_pki_dir }}/private/{{ openvpn_server_cn }}.key
+# A copy: the daemon re-reads it as `nobody`, which cannot enter the 0700 PKI.
+crl-verify {{ openvpn_server_dir }}/crl.pem
+tls-crypt {{ openvpn_server_dir }}/tls-crypt.key
+# EC keys plus TLS 1.2+ negotiate ECDH, so no static DH parameters.
+dh none
+
+data-ciphers AES-256-GCM
+data-ciphers-fallback AES-256-GCM
+auth SHA256
+tls-version-min 1.2
+tls-cert-profile preferred
+remote-cert-tls client
+
+# Split tunnel by omission: no redirect-gateway, no pushed DNS, no forwarding, no NAT.
+
+keepalive 10 120
+persist-key
+persist-tun
+user nobody
+group nogroup
+explicit-exit-notify 1
+
+# duplicate-cn stays off: one connection per certificate.
+# No `log` directive: output goes to the journal, where Alloy collects it.
+verb 3
+status /run/openvpn-server/status-{{ openvpn_instance }}.log

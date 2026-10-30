@@ -1,6 +1,231 @@
 ---
-# openvpn role — valid stub. Real logic lands in a dedicated ticket.
-# The debug task is a no-op: stays "ok", never "changed" (idempotent).
-- name: Placeholder (no action)
-  ansible.builtin.debug:
-    msg: "Role {{ ansible_role_name }}: stub — nothing to do yet."
+# Every creation step is guarded on the file it produces: a replay must never re-issue a
+# certificate, which would invalidate a .ovpn already handed out.
+
+- name: Refuse an interface name the firewall does not open
+  ansible.builtin.assert:
+    that:
+      - firewall_vpn_interface is not defined or openvpn_interface == firewall_vpn_interface
+    fail_msg: >-
+      openvpn_interface ({{ openvpn_interface }}) differs from firewall_vpn_interface
+      ({{ firewall_vpn_interface | default('undefined') }}): SSH would be allowed on an
+      interface OpenVPN never creates.
+    quiet: true
+
+- name: Assert the CA passphrase is available
+  ansible.builtin.assert:
+    that:
+      - openvpn_ca_passphrase | default('') | length > 0
+    fail_msg: "openvpn_ca_passphrase is empty — add vault_openvpn_ca_passphrase to the vault."
+    quiet: true
+
+- name: Install OpenVPN and easy-rsa
+  ansible.builtin.apt:
+    name: "{{ openvpn_packages }}"
+    state: present
+    cache_valid_time: 3600
+
+- name: Create the OpenVPN directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ openvpn_server_dir }}"
+      mode: "0755"
+    - path: "{{ openvpn_easyrsa_dir }}"
+      mode: "0700"
+    - path: "{{ openvpn_clients_dir }}"
+      mode: "0700"
+  loop_control:
+    label: "{{ item.path }}"
+
+# The passphrase travels in the environment of the signing commands: readable in /proc for
+# the length of a signature, where a file on disk would be stolen along with the key.
+#
+# build-ca is wrapped in `timeout` because it is the one command that can still decide to
+# prompt: closing its stdin does not help — its read loop reprompts forever on EOF — so the
+# only bound that works is wall-clock. A deploy must fail, never hang.
+- name: Initialise the PKI
+  ansible.builtin.command:
+    cmd: "{{ openvpn_easyrsa_bin }} init-pki"
+    chdir: "{{ openvpn_easyrsa_dir }}"
+    creates: "{{ openvpn_pki_dir }}/openssl-easyrsa.cnf"
+  environment: "{{ openvpn_easyrsa_env }}"
+
+- name: Build the certificate authority
+  ansible.builtin.command:
+    cmd: "timeout {{ openvpn_easyrsa_timeout }} {{ openvpn_easyrsa_bin }} build-ca"
+    chdir: "{{ openvpn_easyrsa_dir }}"
+    creates: "{{ openvpn_pki_dir }}/ca.crt"
+  environment: "{{ openvpn_easyrsa_env | combine(openvpn_easyrsa_ca_build) }}"
+  no_log: "{{ hide_secrets | default(true) }}"
+
+# nopass on the server key only: the service must come back after a reboot unattended.
+- name: Issue the server certificate
+  ansible.builtin.command:
+    cmd: "{{ openvpn_easyrsa_bin }} build-server-full {{ openvpn_server_cn }} nopass"
+    chdir: "{{ openvpn_easyrsa_dir }}"
+    creates: "{{ openvpn_pki_dir }}/issued/{{ openvpn_server_cn }}.crt"
+  environment: "{{ openvpn_easyrsa_env | combine(openvpn_easyrsa_ca_in) }}"
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: Generate the certificate revocation list
+  ansible.builtin.command:
+    cmd: "{{ openvpn_easyrsa_bin }} gen-crl"
+    chdir: "{{ openvpn_easyrsa_dir }}"
+    creates: "{{ openvpn_pki_dir }}/crl.pem"
+  environment: "{{ openvpn_easyrsa_env | combine(openvpn_easyrsa_ca_in) }}"
+  no_log: "{{ hide_secrets | default(true) }}"
+
+# tls-crypt, not tls-auth: it encrypts the control channel as well as authenticating it.
+- name: Generate the tls-crypt key
+  ansible.builtin.command:
+    cmd: "openvpn --genkey secret {{ openvpn_server_dir }}/tls-crypt.key"
+    creates: "{{ openvpn_server_dir }}/tls-crypt.key"
+
+- name: Lock down the tls-crypt key
+  ansible.builtin.file:
+    path: "{{ openvpn_server_dir }}/tls-crypt.key"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Allow binding to the VPN address before the tunnel is up
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: "1"
+    sysctl_file: /etc/sysctl.d/99-greener-openvpn.conf
+    state: present
+    reload: true
+  when: openvpn_nonlocal_bind | bool
+
+# Clients come from users.yml, so an offboarding stays one PR: `vpn: true` mirrors `grafana:`.
+- name: Select the accounts that get a VPN certificate
+  ansible.builtin.set_fact:
+    openvpn_client_cns: >-
+      {{ system_users
+         | selectattr('state', 'eq', 'present')
+         | selectattr('vpn', 'defined')
+         | selectattr('vpn')
+         | map(attribute='name') | list }}
+
+- name: Issue the client certificates
+  ansible.builtin.command:
+    cmd: "{{ openvpn_easyrsa_bin }} build-client-full {{ item }} nopass"
+    chdir: "{{ openvpn_easyrsa_dir }}"
+    creates: "{{ openvpn_pki_dir }}/issued/{{ item }}.crt"
+  environment: "{{ openvpn_easyrsa_env | combine(openvpn_easyrsa_ca_in) }}"
+  loop: "{{ openvpn_client_cns }}"
+  no_log: "{{ hide_secrets | default(true) }}"
+
+- name: List the certificates the PKI has issued
+  ansible.builtin.find:
+    paths: "{{ openvpn_pki_dir }}/issued"
+    patterns: "*.crt"
+  register: openvpn_issued
+
+# The server's own certificate is excluded: revoking it would take the VPN down with it.
+- name: Select the certificates to revoke
+  ansible.builtin.set_fact:
+    openvpn_revoke_cns: >-
+      {{ openvpn_issued.files | map(attribute='path') | map('basename')
+         | map('regex_replace', '\.crt$', '') | list
+         | difference(openvpn_client_cns + [openvpn_server_cn]) }}
+
+- name: Revoke the certificates that should no longer exist
+  ansible.builtin.command:
+    cmd: "{{ openvpn_easyrsa_bin }} revoke {{ item }}"
+    chdir: "{{ openvpn_easyrsa_dir }}"
+    removes: "{{ openvpn_pki_dir }}/issued/{{ item }}.crt"
+  environment: "{{ openvpn_easyrsa_env | combine(openvpn_easyrsa_ca_in) }}"
+  loop: "{{ openvpn_revoke_cns }}"
+  no_log: "{{ hide_secrets | default(true) }}"
+
+# Not a handler: handlers run after every task, so the copy below would publish a stale list.
+- name: Refresh the revocation list after a revocation
+  ansible.builtin.command:
+    cmd: "{{ openvpn_easyrsa_bin }} gen-crl"
+    chdir: "{{ openvpn_easyrsa_dir }}"
+  environment: "{{ openvpn_easyrsa_env | combine(openvpn_easyrsa_ca_in) }}"
+  when: openvpn_revoke_cns | length > 0
+  changed_when: true
+  no_log: "{{ hide_secrets | default(true) }}"
+  notify: Restart openvpn
+
+- name: Drop the profiles of the revoked clients
+  ansible.builtin.file:
+    path: "{{ openvpn_clients_dir }}/{{ item }}.ovpn"
+    state: absent
+  loop: "{{ openvpn_revoke_cns }}"
+
+# A copy, because the daemon re-reads it as `nobody`, which cannot enter the 0700 PKI.
+- name: Publish the revocation list where the daemon can read it
+  ansible.builtin.copy:
+    src: "{{ openvpn_pki_dir }}/crl.pem"
+    dest: "{{ openvpn_server_dir }}/crl.pem"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart openvpn
+
+# No validate: OpenVPN has no offline config check that does not also want the runtime files.
+- name: Render the server configuration
+  ansible.builtin.template:
+    src: server.conf.j2
+    dest: "{{ openvpn_server_dir }}/{{ openvpn_instance }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart openvpn
+
+- name: Render the client profile template
+  ansible.builtin.template:
+    src: client-base.conf.j2
+    dest: "{{ openvpn_clients_dir }}/base.conf"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Install the profile assembly script
+  ansible.builtin.template:
+    src: greener-vpn-profile.sh.j2
+    dest: /usr/local/sbin/greener-vpn-profile
+    owner: root
+    group: root
+    mode: "0700"
+    validate: "bash -n %s"
+
+# Assembled on the host, so a client private key never reaches the controller. The script
+# owns its own freshness check, hence no `creates:` here.
+- name: Build the client profiles
+  ansible.builtin.command:
+    cmd: "/usr/local/sbin/greener-vpn-profile {{ item }}"
+  loop: "{{ openvpn_client_cns }}"
+  register: openvpn_profiles
+  changed_when: "'built' in openvpn_profiles.stdout"
+
+- name: Enable and start the OpenVPN server
+  ansible.builtin.systemd:
+    name: "{{ openvpn_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - openvpn_enabled | bool
+    - not ansible_check_mode
+
+# Facts predate tun0, and the firewall's VPN-only guard reads them.
+- name: Refresh the network facts now that the VPN interface exists
+  ansible.builtin.setup:
+    gather_subset:
+      - "!all"
+      - network
+  when:
+    - openvpn_enabled | bool
+    - not ansible_check_mode
+
+# Delivery is NOT here: see tasks/fetch.yml and vpn-profiles.yml.

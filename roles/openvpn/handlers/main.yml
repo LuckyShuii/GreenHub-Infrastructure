@@ -1,2 +1,10 @@
 ---
-# Handlers for the openvpn role (restarts/reloads — to be filled).
+# Restart, not reload: a reload leaves an already-authenticated session alive, and cutting it
+# is the point of a revocation. Cost: everyone is dropped for ~2 s and reconnects on its own.
+- name: Restart openvpn
+  ansible.builtin.systemd:
+    name: "{{ openvpn_service }}"
+    state: restarted
+  when:
+    - openvpn_enabled | bool
+    - not ansible_check_mode
