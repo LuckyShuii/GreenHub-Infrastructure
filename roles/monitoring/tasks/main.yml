@@ -348,7 +348,7 @@
 # no_log hides the admin password; re-run with -e hide_secrets=false to see the response.
 - name: Verify Grafana can query Loki
   ansible.builtin.uri:
-    url: "http://{{ monitoring_grafana_publish }}/api/datasources/uid/loki/health"
+    url: "{{ monitoring_grafana_api }}/api/datasources/uid/loki/health"
     url_username: "{{ monitoring_grafana_admin_user }}"
     url_password: "{{ grafana_admin_password }}"
     force_basic_auth: true
@@ -366,7 +366,7 @@
 # exporters having data — that is the next task.
 - name: Verify Grafana can query Prometheus
   ansible.builtin.uri:
-    url: "http://{{ monitoring_grafana_publish }}/api/datasources/uid/prometheus/health"
+    url: "{{ monitoring_grafana_api }}/api/datasources/uid/prometheus/health"
     url_username: "{{ monitoring_grafana_admin_user }}"
     url_password: "{{ grafana_admin_password }}"
     force_basic_auth: true
@@ -406,7 +406,7 @@
 # an unparseable provisioning file leaves Grafana up and simply without the contact point.
 - name: Verify the Discord contact point is provisioned
   ansible.builtin.uri:
-    url: "http://{{ monitoring_grafana_publish }}/api/v1/provisioning/contact-points"
+    url: "{{ monitoring_grafana_api }}/api/v1/provisioning/contact-points"
     url_username: "{{ monitoring_grafana_admin_user }}"
     url_password: "{{ grafana_admin_password }}"
     force_basic_auth: true
@@ -433,7 +433,7 @@
 # loaded, like everything else here.
 - name: Verify the night mute timing is provisioned
   ansible.builtin.uri:
-    url: "http://{{ monitoring_grafana_publish }}/api/v1/provisioning/mute-timings"
+    url: "{{ monitoring_grafana_api }}/api/v1/provisioning/mute-timings"
     url_username: "{{ monitoring_grafana_admin_user }}"
     url_password: "{{ grafana_admin_password }}"
     force_basic_auth: true
@@ -455,7 +455,7 @@
 # this role claims to deploy, so a rejected rule fails the run instead of looking deployed.
 - name: Verify every alert rule is provisioned
   ansible.builtin.uri:
-    url: "http://{{ monitoring_grafana_publish }}/api/v1/provisioning/alert-rules"
+    url: "{{ monitoring_grafana_api }}/api/v1/provisioning/alert-rules"
     url_username: "{{ monitoring_grafana_admin_user }}"
     url_password: "{{ grafana_admin_password }}"
     force_basic_auth: true

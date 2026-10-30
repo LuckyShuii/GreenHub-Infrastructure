@@ -9,10 +9,13 @@
 
 ## 1. Accès
 
-- URL : `https://grafana.lucasboillot.fr` (exposition publique assumée tant que le VPN
-  SCRUM-58 n'existe pas).
-- Alternative sans exposition : `ssh -L 3000:127.0.0.1:3000 <user>@<vps>` puis
-  `http://localhost:3000`.
+- URL : **`http://10.8.0.1:3000`, VPN monté.** L'exposition publique
+  (`grafana.lucasboillot.fr`) a été fermée : Grafana n'est plus joignable que par le VPN.
+  En HTTP et non HTTPS, volontairement — le tunnel chiffre déjà, et aucune autorité ne
+  certifie une adresse privée (détail dans `roles/monitoring/README.md`).
+- Porte de secours si le VPN lui-même est cassé : `ssh -L 3000:127.0.0.1:3000 <user>@<vps>`
+  puis `http://localhost:3000` — mais SSH est aussi VPN-only désormais, donc cette porte
+  suppose le pare-feu rouvert depuis la console de secours.
 - Un compte nominatif par personne, piloté par `group_vars/all/users.yml` (2 Admin,
   5 Editor). Mot de passe individuel, au vault, restauré à chaque déploiement.
 - Editor et pas Viewer pour les devs : Viewer n'a pas accès à *Explore*.
@@ -25,9 +28,9 @@
 
 ---
 
-## 2. Dashboards disponibles (5)
+## 2. Dashboards disponibles (6)
 
-**Les cinq portent désormais un marqueur violet à chaque déploiement**, avec la version
+**Ils portent un marqueur violet à chaque déploiement**, avec la version
 déployée. C'est la réponse d'un coup d'œil à « ça a commencé après quel déploiement ? ».
 
 ### `GREENER — Logs` (uid `greener-logs`)
@@ -73,6 +76,48 @@ déployée. C'est la réponse d'un coup d'œil à « ça a commencé après quel
 - Jours avant expiration TLS, sondes au vert, latence des sondes.
 - Disponibilité et temps de réponse des sondes.
 - Erreurs et avertissements Caddy (logs) — c'est là que se voit un ACME en échec.
+
+---
+
+### `GREENER — Accès SSH` (uid `greener-ssh`) — **nouveau**
+
+Qui se connecte au serveur, depuis quelle adresse VPN, et ce qui a été refusé. Source : le
+journal systemd de `ssh.service`.
+
+| Section | Ce qu'on y lit |
+|---|---|
+| Vue d'ensemble | acceptations, refus, nombre d'utilisateurs et d'adresses sources distinctes |
+| **Journal lisible** | **les deux tableaux à lire en premier** (voir ci-dessous) |
+| Qui se connecte | barres empilées par utilisateur, et les totaux `utilisateur / source / méthode` |
+| Tentatives refusées | refus ventilés par motif, plus le journal brut |
+| Journal sshd complet | replié par défaut : toutes les lignes, filtrables par le champ *Recherche* |
+
+**Les deux tableaux de « Journal lisible »** remplacent la lecture du log brut, un événement
+par ligne, le plus récent en haut, toutes les colonnes filtrables :
+
+| Tableau | Colonnes | Couleurs |
+|---|---|---|
+| Authentifications | heure, utilisateur, méthode, statut, source | **vert** accepté, **rouge** refusé |
+| Sessions | heure, utilisateur, statut | **vert** ouverture, **bleu** fermeture |
+
+Deux pièges de lecture. La colonne **Méthode est vide sur un refus** survenu avant que le
+client ne propose une clé — utilisateur inconnu, abandon pré-auth : il n'y a pas de méthode à
+rapporter. Et **authentification n'est pas session** : une authentification acceptée ouvre une
+session, dont la fermeture est la déconnexion ; une ouverture sans fermeture correspondante est
+une session encore active.
+
+Les colonnes ne sortent pas du log telles quelles : Loki range les champs extraits dans un
+seul objet, c'est la transformation *extractFields* du panneau qui les éclate en colonnes.
+
+Deux colonnes méritent un regard régulier. **`méthode`** doit toujours valoir `publickey` :
+un `password` signalerait que le durcissement SSH a régressé. Et **`source`** doit toujours
+être dans `10.8.0.0/24` : une adresse publique voudrait dire que SSH est joignable autrement
+que par le tunnel.
+
+Le journal de `sshd` n'était pas collecté avant : le port 22 étant ouvert sur Internet, il
+était saturé de scans refusés (3 252 lignes en 24 h, essentiellement `root`, `ubuntu` et
+`admin`). La fermeture du port public a fait disparaître ce bruit, ce qui rend la collecte
+utile — chaque ligne décrit désormais une tentative d'un membre de l'équipe.
 
 ---
 

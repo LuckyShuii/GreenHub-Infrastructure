@@ -125,10 +125,9 @@ deploy.{{ caddy_domain }} {
 {% endif %}
 
 {% if caddy_grafana_enabled | bool %}
-# Grafana, exposed publicly ONLY when grafana_public is on. Caddy terminates TLS and
-# forwards to the loopback port the monitoring role publishes; the only authentication is
-# Grafana's own admin login, which is why this stays off until the VPN lands (SCRUM-58).
-# Needs a DNS record for grafana.{{ caddy_domain }} or ACME cannot issue its certificate.
+# Grafana, exposed publicly ONLY when grafana_public is on — it is off: Grafana answers on
+# the VPN address instead, and the only authentication here would be its own admin login.
+# Turning it back on needs a DNS record for grafana.{{ caddy_domain }}, or ACME cannot issue.
 grafana.{{ caddy_domain }} {
 	import security_headers
 

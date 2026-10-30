@@ -1,0 +1,874 @@
+{
+  "uid": "greener-ssh",
+  "title": "GREENER — Accès SSH",
+  "description": "Connexions SSH des membres de l'équipe : qui se connecte, depuis quelle adresse VPN, et ce qui a été refusé. Source : journal systemd de ssh.service, collecté par Alloy.",
+  "tags": [
+    "greener",
+    "ssh",
+    "securite",
+    "logs"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "name": "Annotations & Alerts",
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "search",
+        "label": "Recherche",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "description": "Filtre plein texte sur le journal complet (insensible à la casse)."
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Vue d'ensemble",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Connexions acceptées",
+      "description": "Authentifications réussies sur la plage affichée. SSH n'étant joignable que par le VPN, chaque ligne est un membre de l'équipe.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service=\"ssh\", source=\"journal\"} |= \"Accepted \" [$__auto]))",
+          "legendFormat": "v"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Tentatives refusées",
+      "description": "Clé refusée, utilisateur inconnu, ou abandon avant authentification.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service=\"ssh\", source=\"journal\"} | level=\"warn\" [$__auto]))",
+          "legendFormat": "v"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Utilisateurs distincts",
+      "description": "Comptes ayant ouvert au moins une session sur la plage.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "count (sum by (user) (count_over_time({service=\"ssh\", source=\"journal\"} |= \"Accepted \" | pattern `Accepted <method> for <user> from <ip> port <_>` [$__auto])))",
+          "legendFormat": "v"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Adresses sources distinctes",
+      "description": "Doit rester dans 10.8.0.0/24 : une adresse publique signifierait que SSH est joignable hors du tunnel.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "count (sum by (ip) (count_over_time({service=\"ssh\", source=\"journal\"} |= \"Accepted \" | pattern `Accepted <method> for <user> from <ip> port <_>` [$__auto])))",
+          "legendFormat": "v"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Journal lisible",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "type": "table",
+      "title": "Authentifications — qui, quand, accepté ou refusé",
+      "description": "Un événement d'authentification par ligne, le plus récent en haut. La colonne Méthode est vide sur un refus survenu avant que le client ne propose une clé (utilisateur inconnu, abandon pré-auth). Toutes les colonnes sont filtrables par l'icône d'en-tête.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"ssh\", source=\"journal\"} |~ \"Accepted |Failed |Invalid user |Connection closed by (authenticating|invalid) user|Disconnected from authenticating user\" | regexp \"(?P<evt>Accepted|Failed|Invalid user|Connection closed by authenticating user|Connection closed by invalid user|Disconnected from authenticating user)\" | regexp \"(?:(?P<methode>publickey|password|keyboard-interactive) )?(?:for|user) (?P<user>[^ ]+) (?:from )?(?P<ip>[0-9.]+)\" | label_format statut=`{{ if eq .evt \"Accepted\" }}Accepté{{ else }}Refusé{{ end }}`"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "json",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Time",
+                "user",
+                "methode",
+                "statut",
+                "ip"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "Time": 0,
+              "user": 1,
+              "methode": 2,
+              "statut": 3,
+              "ip": 4
+            },
+            "renameByName": {
+              "user": "Utilisateur",
+              "methode": "Méthode",
+              "statut": "Statut",
+              "ip": "Source",
+              "Time": "Heure"
+            }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ]
+        },
+        "sortBy": [
+          {
+            "displayName": "Heure",
+            "desc": true
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Heure"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 165
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Statut"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Accepté": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "Accepté"
+                      },
+                      "Refusé": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "Refusé"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Sessions — ouvertures et fermetures",
+      "description": "Le cycle de vie des sessions, tel que PAM le rapporte. À distinguer de l'authentification : une authentification acceptée ouvre une session, et sa fermeture est la déconnexion. Une ouverture sans fermeture correspondante signifie une session encore active.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"ssh\", source=\"journal\"} |~ \"session (opened|closed) for user\" | regexp \"session (?P<evt>opened|closed) for user (?P<user>[^( ]+)\" | label_format statut=`{{ if eq .evt \"opened\" }}Ouverture{{ else }}Fermeture{{ end }}`"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "json",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Time",
+                "user",
+                "statut"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "Time": 0,
+              "user": 1,
+              "statut": 2
+            },
+            "renameByName": {
+              "user": "Utilisateur",
+              "statut": "Statut",
+              "Time": "Heure"
+            }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ]
+        },
+        "sortBy": [
+          {
+            "displayName": "Heure",
+            "desc": true
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Heure"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 165
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Statut"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Ouverture": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "Ouverture"
+                      },
+                      "Fermeture": {
+                        "color": "blue",
+                        "index": 1,
+                        "text": "Fermeture"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "Qui se connecte",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Connexions acceptées, par utilisateur",
+      "description": "Une barre par utilisateur et par intervalle : qui travaille sur le serveur, et quand.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (user) (count_over_time({service=\"ssh\", source=\"journal\"} |= \"Accepted \" | pattern `Accepted <method> for <user> from <ip> port <_>` [$__auto]))",
+          "legendFormat": "{{user}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            },
+            "barAlignment": 0,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Totaux par utilisateur et source",
+      "description": "Agrégat de la plage affichée. `Méthode` doit toujours valoir publickey : un `password` signalerait une régression du durcissement SSH.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "instant",
+          "format": "table",
+          "expr": "sum by (user, ip, method) (count_over_time({service=\"ssh\", source=\"journal\"} |= \"Accepted \" | pattern `Accepted <method> for <user> from <ip> port <_>` [$__range]))"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "user": "Utilisateur",
+              "ip": "Source",
+              "method": "Méthode",
+              "Value": "Connexions"
+            }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ]
+        },
+        "sortBy": [
+          {
+            "displayName": "Connexions",
+            "desc": true
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Tentatives refusées",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Refus, par motif",
+      "description": "Un utilisateur inconnu est une faute de frappe ou un scan ; une clé refusée est un membre dont la clé n'est pas, ou plus, dans users.yml. Les deux derniers motifs restent souvent à zéro — c'est normal.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 27
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service=\"ssh\", source=\"journal\"} |~ \"Invalid user\" [$__auto]))",
+          "legendFormat": "utilisateur inconnu"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service=\"ssh\", source=\"journal\"} |~ \"Connection closed by (authenticating|invalid) user|Disconnected from authenticating user\" [$__auto]))",
+          "legendFormat": "abandon avant authentification"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service=\"ssh\", source=\"journal\"} |~ \"Failed (password|publickey)\" [$__auto]))",
+          "legendFormat": "clé ou mot de passe refusé"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (count_over_time({service=\"ssh\", source=\"journal\"} | level=\"error\" [$__auto]))",
+          "legendFormat": "erreur protocole"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "none"
+            },
+            "barAlignment": 0,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Détail des refus",
+      "description": "Le journal brut des tentatives refusées, utile quand le tableau ne suffit pas.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 27
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"ssh\", source=\"journal\"} | level=~\"warn|error\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Journal sshd complet",
+      "collapsed": true,
+      "panels": [
+        {
+          "type": "logs",
+          "title": "Toutes les lignes sshd",
+          "description": "Le journal intégral, filtrable par le champ Recherche en haut du tableau de bord.",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 35
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "expr": "{service=\"ssh\", source=\"journal\"} |~ \"(?i)$search\""
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": false,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      }
+    }
+  ]
+}
