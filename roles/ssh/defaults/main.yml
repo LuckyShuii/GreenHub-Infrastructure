@@ -1,2 +1,5 @@
 ---
-# Default vars for the ssh role (to be filled).
+ssh_port: 22
+ssh_required_rsa_size: 4096
+# RequiredRSASize n'existe qu'à partir d'OpenSSH 9.1 (Ubuntu 24.04 oui, 22.04 non).
+ssh_enforce_rsa_size: true

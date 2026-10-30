@@ -1,0 +1,27 @@
+# {{ ansible_managed }}
+Port {{ ssh_port }}
+
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# --- Authentification : clés uniquement ---
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PubkeyAcceptedAlgorithms ssh-ed25519,sk-ssh-ed25519@openssh.com,rsa-sha2-512,rsa-sha2-256
+{% if ssh_enforce_rsa_size %}
+RequiredRSASize {{ ssh_required_rsa_size }}
+{% endif %}
+UsePAM yes
+
+# --- Réduction de surface ---
+MaxAuthTries 3
+LoginGraceTime 30
+X11Forwarding no
+PermitTunnel no
+PrintMotd no
+
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server

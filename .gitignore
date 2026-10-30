@@ -15,6 +15,7 @@ vault_pass
 collections/
 
 .claude
+# Local Python env
 
 # Local Python virtualenv (ansible, ansible-lint, yamllint)
 .venv/

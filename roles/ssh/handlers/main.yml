@@ -1,2 +1,6 @@
 ---
-# Handlers for the ssh role (restarts/reloads — to be filled).
+# reload (not restart): open sessions survive a config change.
+- name: Reload ssh
+  ansible.builtin.service:
+    name: ssh
+    state: reloaded
